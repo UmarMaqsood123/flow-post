@@ -18,11 +18,28 @@ export const queryKeys = {
     invitationPreview: (token: string) => [...WORKSPACES, "invitation-preview", token] as const,
     /** Prefix for every file list in a workspace (all kinds). */
     files: (workspaceId: string) => [...workspaceDetail(workspaceId), "files"] as const,
+    socialAccounts: (workspaceId: string) =>
+      [...workspaceDetail(workspaceId), "social-accounts"] as const,
+    socialPlatforms: (workspaceId: string) =>
+      [...workspaceDetail(workspaceId), "social-platforms"] as const,
     dashboard: (workspaceId: string) => [...workspaceDetail(workspaceId), "dashboard"] as const,
     notifications: (workspaceId: string) =>
       [...workspaceDetail(workspaceId), "notifications"] as const,
     brandProfile: (workspaceId: string) =>
       [...workspaceDetail(workspaceId), "brand-profile"] as const,
+    /** Prefix for the strategy version list and every strategy. */
+    contentStrategies: (workspaceId: string) =>
+      [...workspaceDetail(workspaceId), "content-strategies"] as const,
+    contentStrategyList: (workspaceId: string) =>
+      [...workspaceDetail(workspaceId), "content-strategies", "list"] as const,
+    /** Prefix for every post list (all filters). */
+    postLists: (workspaceId: string) => [...workspaceDetail(workspaceId), "posts", "list"] as const,
+    postList: (workspaceId: string, query: object) =>
+      [...workspaceDetail(workspaceId), "posts", "list", query] as const,
+    post: (workspaceId: string, postId: string) =>
+      [...workspaceDetail(workspaceId), "posts", "detail", postId] as const,
+    contentStrategy: (workspaceId: string, strategyId: string) =>
+      [...workspaceDetail(workspaceId), "content-strategies", "detail", strategyId] as const,
   },
   health: {
     all: ["health"] as const,

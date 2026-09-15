@@ -21,11 +21,20 @@ export default defineConfig({
       UPLOAD_MAX_FILE_SIZE_MB: "1",
       UPLOAD_MAX_VIDEO_SIZE_MB: "2",
       UPLOAD_MAX_FILES: "3",
+      // Fixed test-only key (32 bytes of 0x07). Never use outside tests.
+      TOKEN_ENCRYPTION_KEY: "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=",
       RATE_LIMIT_STORE: "memory",
       // Tests give each client its own X-Forwarded-For IP so per-IP limits stay isolated.
       TRUST_PROXY: "1",
       FRONTEND_URL: "http://localhost:5173",
       CORS_ORIGINS: "http://localhost:5173",
+      // Blank out real credentials from a local .env so tests never call external APIs.
+      LINKEDIN_CLIENT_ID: "",
+      LINKEDIN_CLIENT_SECRET: "",
+      LINKEDIN_REDIRECT_URI: "",
+      OPENAI_API_KEY: "",
+      OPENAI_MODEL: "",
+      AI_PROVIDER: "openai",
     },
   },
 });

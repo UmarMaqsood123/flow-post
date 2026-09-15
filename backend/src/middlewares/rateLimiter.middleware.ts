@@ -156,3 +156,53 @@ export const workspaceRateLimiters = {
     message: "Too many uploads. Please try again later.",
   }),
 };
+
+/** Each generation costs money, so limits apply per user and per workspace. */
+export const aiRateLimiters = {
+  generateByUser: createRateLimiter({
+    name: "ai-generate-user",
+    windowMs: HOUR_MS,
+    limit: 60,
+    keyGenerator: userKey,
+    message: "You've made a lot of AI requests recently. Please try again later.",
+  }),
+  generateByWorkspace: createRateLimiter({
+    name: "ai-generate-workspace",
+    windowMs: HOUR_MS,
+    limit: 200,
+    keyGenerator: (req) => `workspace:${String(req.params.workspaceId)}`,
+    message: "This workspace has made a lot of AI requests recently. Please try again later.",
+  }),
+};
+
+export const socialRateLimiters = {
+  connect: createRateLimiter({
+    name: "social-connect",
+    windowMs: HOUR_MS,
+    limit: 30,
+    keyGenerator: userKey,
+    message: "Too many connection attempts. Please try again later.",
+  }),
+  /** Unauthenticated (the platform redirects the browser), so keyed by IP. */
+  oauthCallback: createRateLimiter({
+    name: "social-oauth-callback",
+    windowMs: 15 * MINUTE_MS,
+    limit: 30,
+    keyGenerator: ipKey,
+  }),
+  test: createRateLimiter({
+    name: "social-test",
+    windowMs: HOUR_MS,
+    limit: 30,
+    keyGenerator: userKey,
+    message: "Too many connection tests. Please try again later.",
+  }),
+  /** Platforms enforce their own daily limits too (LinkedIn: about 150 requests per member per day). */
+  publish: createRateLimiter({
+    name: "social-publish",
+    windowMs: HOUR_MS,
+    limit: 50,
+    keyGenerator: userKey,
+    message: "Too many posts published recently. Please try again later.",
+  }),
+};

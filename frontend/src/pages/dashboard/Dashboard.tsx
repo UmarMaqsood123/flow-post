@@ -22,6 +22,7 @@ import useSession from "@/services/auth/useSession";
 import useBrandProfile from "@/services/brandProfile/useBrandProfile";
 import { toDashboardPreview } from "@/services/dashboard/dashboardApi";
 import useDashboardSummary from "@/services/dashboard/useDashboardSummary";
+import { useSocialAccounts } from "@/services/socialAccounts/useSocialAccounts";
 import useCurrentWorkspace from "@/services/workspace/useCurrentWorkspace";
 import useWorkspaceInvitations from "@/services/workspace/useWorkspaceInvitations";
 import useWorkspaceMembers from "@/services/workspace/useWorkspaceMembers";
@@ -35,13 +36,25 @@ interface AnalyticsProps {
   timeZone?: string;
   /** Resets per-workspace widget state such as dismissed recommendations. */
   workspaceKey: string;
+  /** Real count of connected accounts; replaces the sample number once loaded. */
+  connectedAccounts?: number;
 }
 
-function DashboardAnalytics({ summary, isLoading, timeZone, workspaceKey }: AnalyticsProps) {
+function DashboardAnalytics({
+  summary,
+  isLoading,
+  timeZone,
+  workspaceKey,
+  connectedAccounts,
+}: AnalyticsProps) {
+  const stats =
+    summary && connectedAccounts !== undefined
+      ? { ...summary.stats, connectedAccounts }
+      : summary?.stats;
   return (
     <>
       {summary?.isSample && <SampleDataNotice />}
-      <DashboardStats stats={summary?.stats} isLoading={isLoading} />
+      <DashboardStats stats={stats} isLoading={isLoading} />
       {/* items-start: each card keeps its own height instead of stretching to the tallest. */}
       <div className="grid items-start gap-6 lg:grid-cols-3">
         <EngagementWidget
@@ -108,6 +121,7 @@ function Dashboard() {
   const members = useWorkspaceMembers(workspace?.id);
   const invitations = useWorkspaceInvitations(workspace?.id, isAdmin);
   const brandProfile = useBrandProfile(workspace?.id);
+  const socialAccounts = useSocialAccounts(workspace?.id);
   const summary = useDashboardSummary({
     workspace,
     brandProfile: brandProfile.data,
@@ -175,13 +189,18 @@ function Dashboard() {
     },
     {
       label: "Connect your social accounts",
-      description: "LinkedIn, Instagram, Facebook, X, TikTok, YouTube and more.",
-      done: false,
-      comingSoon: true,
+      description: "Start with LinkedIn. More platforms are on the way.",
+      done: (socialAccounts.data?.length ?? 0) > 0,
+      action: isAdmin ? (
+        <Link to={paths.socialAccounts} className={smallButton("secondary")}>
+          Connect
+        </Link>
+      ) : undefined,
     },
   ];
   // Hide the checklist once everything this user can act on is done (and data has loaded).
-  const checklistLoaded = !current || (!brandProfile.isPending && !members.isPending);
+  const checklistLoaded =
+    !current || (!brandProfile.isPending && !members.isPending && !socialAccounts.isPending);
   const showChecklist =
     checklistLoaded &&
     steps.some((step) => !step.comingSoon && !step.done && (step.action || !current));
@@ -234,6 +253,7 @@ function Dashboard() {
             isLoading={summary.isPending}
             timeZone={workspace.timezone}
             workspaceKey={workspace.id}
+            connectedAccounts={socialAccounts.data?.length}
           />
         )}
       </>

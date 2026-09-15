@@ -11,6 +11,8 @@ export const paths = {
 
   // App (sidebar layout), in sidebar order
   dashboard: "/dashboard",
+  /** Content strategy; `?version=` selects a version. */
+  contentStrategy: "/strategy",
   aiCreate: "/create",
   content: "/content",
   calendar: "/calendar",

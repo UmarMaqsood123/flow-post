@@ -13,6 +13,10 @@ const booleanString = z
   .default("false")
   .transform((value) => value === "true");
 
+/** 32 random bytes, base64 or base64url encoded. */
+const isEncryptionKey = (key: string) =>
+  /^[A-Za-z0-9+/_-]{43}=?$/.test(key) && Buffer.from(key, "base64").length === 32;
+
 const envSchema = z
   .object({
     NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
@@ -96,6 +100,14 @@ const envSchema = z
     // Third-party integrations — optional until their features are built.
     OPENAI_API_KEY: optionalString,
     OPENAI_MODEL: optionalString,
+    OPENAI_BASE_URL: z.url().default("https://api.openai.com/v1"),
+    // AI provider used by services/ai.service.ts. `none` disables AI features.
+    AI_PROVIDER: z.enum(["openai", "none"]).default("openai"),
+    // Per attempt; retries use exponential backoff and honor Retry-After.
+    AI_REQUEST_TIMEOUT_MS: z.coerce.number().int().min(1000).max(300_000).default(60_000),
+    AI_MAX_RETRIES: z.coerce.number().int().min(0).max(5).default(2),
+    // Upper bound per request; prompts may ask for less.
+    AI_MAX_OUTPUT_TOKENS: z.coerce.number().int().min(256).max(32_000).default(16_000),
     STRIPE_SECRET_KEY: optionalString,
     STRIPE_WEBHOOK_SECRET: optionalString,
     LINKEDIN_CLIENT_ID: optionalString,
@@ -106,6 +118,29 @@ const envSchema = z
     TIKTOK_CLIENT_SECRET: optionalString,
     GOOGLE_CLIENT_ID: optionalString,
     GOOGLE_CLIENT_SECRET: optionalString,
+
+    // Social integrations: key that encrypts OAuth tokens at rest (AES-256-GCM).
+    TOKEN_ENCRYPTION_KEY: optionalString,
+    // Old keys that still decrypt existing tokens during a rotation (comma-separated).
+    TOKEN_ENCRYPTION_PREVIOUS_KEYS: z
+      .string()
+      .default("")
+      .transform((value) =>
+        value
+          .split(",")
+          .map((key) => key.trim())
+          .filter(Boolean),
+      ),
+    SOCIAL_OAUTH_STATE_TTL_MINUTES: z.coerce.number().int().min(1).max(60).default(10),
+
+    // LinkedIn app (products: "Sign In with LinkedIn using OpenID Connect" + "Share on LinkedIn").
+    // Must exactly match a redirect URL registered on the app's Auth tab.
+    LINKEDIN_REDIRECT_URI: optionalString,
+    // Versioned REST API header (YYYYMM). LinkedIn supports each version for at least a year.
+    LINKEDIN_API_VERSION: z
+      .string()
+      .regex(/^\d{6}$/, "LINKEDIN_API_VERSION must be in YYYYMM format")
+      .default("202608"),
   })
   .superRefine((value, ctx) => {
     if (value.STORAGE_PROVIDER === "oci") {
@@ -153,6 +188,62 @@ const envSchema = z
         code: "custom",
         path: ["EMAIL_PROVIDER"],
         message: "EMAIL_PROVIDER must be smtp in production",
+      });
+    }
+    if (value.TOKEN_ENCRYPTION_KEY && !isEncryptionKey(value.TOKEN_ENCRYPTION_KEY)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["TOKEN_ENCRYPTION_KEY"],
+        message: "TOKEN_ENCRYPTION_KEY must be 32 random bytes, base64-encoded",
+      });
+    }
+    if (value.TOKEN_ENCRYPTION_PREVIOUS_KEYS.some((key) => !isEncryptionKey(key))) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["TOKEN_ENCRYPTION_PREVIOUS_KEYS"],
+        message: "Each previous key must be 32 random bytes, base64-encoded",
+      });
+    }
+    const linkedInKeys = [
+      "LINKEDIN_CLIENT_ID",
+      "LINKEDIN_CLIENT_SECRET",
+      "LINKEDIN_REDIRECT_URI",
+    ] as const;
+    if (linkedInKeys.some((key) => value[key])) {
+      for (const key of linkedInKeys) {
+        if (!value[key]) {
+          ctx.addIssue({
+            code: "custom",
+            path: [key],
+            message: `${key} is required to enable LinkedIn (set all of ${linkedInKeys.join(", ")})`,
+          });
+        }
+      }
+      if (value.LINKEDIN_REDIRECT_URI) {
+        let redirect: URL | null = null;
+        try {
+          redirect = new URL(value.LINKEDIN_REDIRECT_URI);
+        } catch {
+          ctx.addIssue({
+            code: "custom",
+            path: ["LINKEDIN_REDIRECT_URI"],
+            message: "LINKEDIN_REDIRECT_URI must be an absolute URL",
+          });
+        }
+        if (redirect && value.NODE_ENV === "production" && redirect.protocol !== "https:") {
+          ctx.addIssue({
+            code: "custom",
+            path: ["LINKEDIN_REDIRECT_URI"],
+            message: "LINKEDIN_REDIRECT_URI must use HTTPS in production",
+          });
+        }
+      }
+    }
+    if (value.NODE_ENV === "production" && !value.TOKEN_ENCRYPTION_KEY) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["TOKEN_ENCRYPTION_KEY"],
+        message: "TOKEN_ENCRYPTION_KEY is required in production",
       });
     }
     // Browsers reject SameSite=None cookies that are not Secure (Secure is on only in production).

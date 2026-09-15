@@ -2,6 +2,7 @@ import {
   Bot,
   CalendarDays,
   ChartColumn,
+  Compass,
   CreditCard,
   FileText,
   Images,
@@ -36,7 +37,7 @@ const aiCreate: NavItem = {
   label: "AI Create",
   to: paths.aiCreate,
   icon: WandSparkles,
-  comingSoon: true,
+  requiresWorkspace: true,
 };
 const content: NavItem = { label: "Content", to: paths.content, icon: FileText, comingSoon: true };
 const calendar: NavItem = {
@@ -46,14 +47,21 @@ const calendar: NavItem = {
   comingSoon: true,
 };
 
+const strategy: NavItem = {
+  label: "Strategy",
+  to: paths.contentStrategy,
+  icon: Compass,
+  requiresWorkspace: true,
+};
+
 export const NAV_SECTIONS: NavSection[] = [
-  { title: "Overview", items: [dashboard, aiCreate] },
+  { title: "Overview", items: [dashboard, strategy, aiCreate] },
   {
     title: "Publishing",
     items: [
       content,
       calendar,
-      { label: "Social Accounts", to: paths.socialAccounts, icon: Share2, comingSoon: true },
+      { label: "Social Accounts", to: paths.socialAccounts, icon: Share2, requiresWorkspace: true },
     ],
   },
   {

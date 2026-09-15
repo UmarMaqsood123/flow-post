@@ -1,12 +1,4 @@
-import {
-  Bot,
-  CalendarDays,
-  ChartColumn,
-  CreditCard,
-  FileText,
-  Share2,
-  WandSparkles,
-} from "lucide-react";
+import { Bot, CalendarDays, ChartColumn, CreditCard, FileText } from "lucide-react";
 import { createBrowserRouter, Navigate } from "react-router";
 import AppLayout from "@/components/layouts/AppLayout";
 import AuthLayout from "@/components/layouts/AuthLayout";
@@ -20,11 +12,14 @@ import ResetPassword from "@/pages/auth/ResetPassword";
 import Signup from "@/pages/auth/Signup";
 import VerifyEmail from "@/pages/auth/VerifyEmail";
 import ComingSoon from "@/pages/ComingSoon";
+import AICreate from "@/pages/create/AICreate";
 import Dashboard from "@/pages/dashboard/Dashboard";
 import Home from "@/pages/Home";
 import AcceptInvitation from "@/pages/invitations/AcceptInvitation";
 import NotFound from "@/pages/NotFound";
 import AccountSettings from "@/pages/settings/AccountSettings";
+import SocialAccounts from "@/pages/social/SocialAccounts";
+import ContentStrategy from "@/pages/strategy/ContentStrategy";
 import BrandProfile from "@/pages/workspaces/BrandProfile";
 import CreateWorkspace from "@/pages/workspaces/CreateWorkspace";
 import TeamMembers from "@/pages/workspaces/TeamMembers";
@@ -42,23 +37,6 @@ const titled = (title: string): RouteHandle => ({ title });
 
 /** Sections that aren't built yet. */
 const placeholderRoutes = [
-  {
-    path: paths.aiCreate,
-    title: "AI Create",
-    element: (
-      <ComingSoon
-        title="AI Create"
-        description="Generate on-brand posts from your brand profile."
-        icon={WandSparkles}
-        features={[
-          "Draft posts in your brand voice for each platform",
-          "Turn one idea into captions for every channel",
-          "Suggest hashtags, hooks and calls to action",
-          "Save drafts for your team to review",
-        ]}
-      />
-    ),
-  },
   {
     path: paths.content,
     title: "Content",
@@ -87,23 +65,6 @@ const placeholderRoutes = [
           "Week and month views in your workspace time zone",
           "Drag and drop to reschedule",
           "Best-time suggestions for each platform",
-        ]}
-      />
-    ),
-  },
-  {
-    path: paths.socialAccounts,
-    title: "Social accounts",
-    element: (
-      <ComingSoon
-        title="Social Accounts"
-        description="Connect the profiles FlowPost publishes to."
-        icon={Share2}
-        note="Social integrations aren't available yet, so the dashboard shows sample data."
-        features={[
-          "LinkedIn, Instagram, Facebook, X, TikTok, YouTube, Pinterest and Threads",
-          "Connection health and reconnect reminders",
-          "Choose which teammates can publish to each account",
         ]}
       />
     ),
@@ -240,6 +201,21 @@ export const router = createBrowserRouter([
               {
                 element: <RequireWorkspace />,
                 children: [
+                  {
+                    path: paths.aiCreate,
+                    element: <AICreate />,
+                    handle: titled("AI Create"),
+                  },
+                  {
+                    path: paths.contentStrategy,
+                    element: <ContentStrategy />,
+                    handle: titled("Content strategy"),
+                  },
+                  {
+                    path: paths.socialAccounts,
+                    element: <SocialAccounts />,
+                    handle: titled("Social accounts"),
+                  },
                   {
                     path: paths.workspaceFiles,
                     element: <WorkspaceFiles />,

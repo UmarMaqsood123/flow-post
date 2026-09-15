@@ -309,6 +309,409 @@ Frontend:
 - **New UI components:** `TagInput` (list entry) and `ChoiceGroup` (radio or checkbox cards and
   chips).
 
+## Social integrations
+
+A provider layer for LinkedIn, Facebook, Instagram, TikTok and YouTube.
+- **LinkedIn** is the first real provider (see [LinkedIn](#linkedin)).
+- **The others** are placeholder providers. Each lists its planned capabilities, reports
+  `available: false`, and fails every call with `NOT_IMPLEMENTED`.
+
+```
+backend/src/integrations/social
+├── capabilities.ts   # capability list, capability → method map, helpers
+├── provider.ts       # SocialProvider interface + BaseSocialProvider
+├── types.ts          # platform-neutral inputs/outputs (tokens, profile, posts, analytics)
+├── errors.ts         # SocialProviderError kinds
+├── registry.ts       # SocialProviderRegistry (one provider per platform)
+└── providers/        # one factory per platform (currently NotImplementedSocialProvider)
+```
+
+**Capabilities:** `TEXT_POST`, `IMAGE_POST`, `VIDEO_POST`, `SHORT_VIDEO`, `CAROUSEL`, `ANALYTICS`,
+`READ_POST`, `DELETE_POST`, `TOKEN_REFRESH`.
+
+- **Declaring:** a provider declares only what the platform supports. For example, Instagram has no
+  `TEXT_POST` or `DELETE_POST`, and YouTube has no `IMAGE_POST`.
+- **Checked before calling the platform:** `socialAccount.service.ts` checks the capability
+  first (422 `SOCIAL_CAPABILITY_UNSUPPORTED`).
+  - One image needs `IMAGE_POST`; several need `CAROUSEL`.
+  - A `format: "short"` video needs `SHORT_VIDEO`.
+- **Base class defaults:** operations a provider doesn't override reject with
+  `UNSUPPORTED_CAPABILITY`.
+- **Registry check:** the registry refuses a provider that declares a capability without
+  implementing its method.
+
+**Adding a platform:**
+
+1. Write a class extending `BaseSocialProvider` in `providers/<platform>.provider.ts`.
+2. Implement OAuth (`getAuthorizationUrl`, `handleOAuthCallback`), `getProfile`, and a method for
+   each declared capability.
+3. Return the class from the platform's factory.
+4. Providers throw only `SocialProviderError`. The service turns each error kind into an account
+   status and an HTTP error:
+   - `TOKEN_EXPIRED` → `EXPIRED`, `REAUTH_REQUIRED` → `REAUTH_REQUIRED`,
+     `ACCOUNT_RESTRICTED` → `ERROR`.
+   - `RATE_LIMITED` → 429, `PROVIDER_ERROR` → 502.
+
+**SocialAccount** fields:
+- `workspace`, `platform`, `providerAccountId`, `accountName`, `username`, `profileImage`.
+- `encryptedAccessToken`, `encryptedRefreshToken`, `tokenExpiresAt`, `scopes`.
+- `status` (`CONNECTED` | `EXPIRED` | `REAUTH_REQUIRED` | `DISCONNECTED` | `ERROR`), `metadata`.
+- Plus `lastError`, `lastConnectedAt`, `lastRefreshedAt` and `connectedBy`.
+
+It is unique per workspace + platform + provider account, so reconnecting updates the same record.
+
+**Token security:**
+- **Encryption:** tokens are encrypted at rest with AES-256-GCM (`utils/encryption.util.ts`,
+  `TOKEN_ENCRYPTION_KEY`). Each ciphertext is authenticated against its workspace, platform,
+  account and field, so a value copied to another record doesn't decrypt.
+- **Key rotation:** set a new key and move the old one to `TOKEN_ENCRYPTION_PREVIOUS_KEYS`. Tokens
+  are re-encrypted with the new key when they're next used.
+- **Never returned:** token fields are `select: false`, stripped from `toJSON`, and never included in
+  `toPublicSocialAccount` (which also omits `metadata`). Providers receive decrypted credentials
+  only for the duration of a call.
+- **Refresh:** tokens expiring within 5 minutes are refreshed before use when the platform supports
+  it. A failed refresh marks the account `REAUTH_REQUIRED`, and no further platform calls are made
+  until the user reconnects.
+
+**OAuth flow:**
+
+1. **Start:** the frontend calls `GET /api/v1/social-accounts/:platform/connect?workspaceId=` with
+   its access token.
+   - The API stores a single-use state, hashed and bound to the user, workspace and platform. It is
+     valid for `SOCIAL_OAUTH_STATE_TTL_MINUTES`. Any PKCE verifier is stored encrypted.
+   - It sets an httpOnly cookie (`SameSite=Lax`, scoped to `/api/v1/social-accounts`) binding the
+     attempt to this browser, and stores only the cookie value's hash.
+   - It returns the consent URL, which the browser then opens.
+   - This is a GET that returns JSON rather than a redirect: the SPA keeps its access token in
+     memory, so a plain browser navigation would not be authenticated.
+2. **Callback:** the platform redirects the browser to `GET /api/v1/social-accounts/:platform/callback`.
+   - The API requires the state and the matching cookie, re-checks that the user is still an admin
+     of an active workspace, exchanges the code and stores encrypted tokens.
+   - It then redirects to `FRONTEND_URL/social-accounts?platform=…&connected=1&workspaceId=…` or
+     `…&error=<reason>`. The reason is one of `cancelled`, `expired`, `permission`, `forbidden`,
+     `unavailable`, `rate_limited` or `failed`; the platform's raw messages are never passed on.
+   - The cookie binding stops someone who sends another person their consent link from connecting
+     that person's account to their own workspace.
+
+| Method | Endpoint                                                          | Minimum role              |
+| ------ | ----------------------------------------------------------------- | ------------------------- |
+| GET    | `/api/v1/workspaces/:workspaceId/social-accounts/platforms`       | VIEWER                    |
+| GET    | `/api/v1/workspaces/:workspaceId/social-accounts`                 | VIEWER                    |
+| GET    | `/api/v1/social-accounts/:platform/connect?workspaceId=`          | ADMIN                     |
+| GET    | `/api/v1/social-accounts/:platform/callback`                      | — (state + browser cookie) |
+| DELETE | `/api/v1/social-accounts/:id` (deletes stored tokens)             | ADMIN                     |
+| POST   | `/api/v1/social-accounts/:id/test` (profile check, posts nothing) | EDITOR                    |
+| POST   | `/api/v1/social-accounts/:id/posts` `{ text, fileId? }`           | EDITOR                    |
+
+Routes that take an account id authorize the workspace that owns the account, so another tenant's
+account id returns the same 404 as an unknown one. `fileId` must be an image in the same
+workspace's media library.
+
+Publishing, reading, deleting posts and analytics are exposed as service functions
+(`publishText`, `publishImage`, `publishVideo`, `getPost`, `deletePost`, `getAnalytics`) for the
+upcoming posts and analytics features.
+
+**Tests:** `tests/helpers/mockSocialProvider.ts` is a full in-memory provider: fake OAuth with PKCE,
+token issuing, rotation and revocation, posts and injectable failures. The tests use it in:
+- `socialProvider.test.ts`: registry, capabilities, defaults.
+- `socialAccount.test.ts`: OAuth, encryption, refresh, failures, permissions, isolation.
+- `encryption.test.ts`.
+
+## LinkedIn
+
+`integrations/social/providers/linkedin.provider.ts` uses only LinkedIn's self-serve products and
+the versioned REST APIs. It was checked against LinkedIn's documentation on Microsoft Learn.
+
+**Permissions** (requested scopes: `openid profile w_member_social`):
+- **Sign In with LinkedIn using OpenID Connect** (`openid`, `profile`): member id, name and photo from
+  `GET https://api.linkedin.com/v2/userinfo`. `email` isn't requested because FlowPost doesn't need it.
+- **Share on LinkedIn** (`w_member_social`): create posts on behalf of the member. If LinkedIn's
+  token response doesn't include this scope, the connection is refused.
+
+**Supported:**
+- The member's **personal profile**.
+- Text posts.
+- Posts with **one JPG or PNG image**.
+- Loading the connected profile.
+- Testing the connection.
+- Disconnecting.
+
+**Not supported, because it needs LinkedIn approval or another product:**
+
+| Feature                         | Requirement                                                            |
+| ------------------------------- | ---------------------------------------------------------------------- |
+| Company Page posting            | Community Management API (`w_organization_social`); LinkedIn vets apps |
+| Reading posts                   | `r_member_social`, restricted to approved apps                         |
+| Post and member analytics       | Approved analytics permissions                                         |
+| Programmatic refresh tokens     | Approved Marketing Developer Platform partners only                    |
+
+Video, document, poll and multi-image posts exist in the Posts API, but they aren't built, so the
+provider doesn't declare those capabilities.
+
+**How publishing works:**
+
+- **Posts:** `POST https://api.linkedin.com/rest/posts` with `LinkedIn-Version: LINKEDIN_API_VERSION`
+  (default `202608`) and `X-Restli-Protocol-Version: 2.0.0`. The author is `urn:li:person:{sub}` and
+  the post id comes back in the `x-restli-id` header.
+- **Post text** uses LinkedIn's "little" format.
+  - Reserved characters (`| { } @ [ ] ( ) < > # \ * _ ~`) are escaped so text publishes literally.
+  - `#hashtags` still work. Mentions aren't supported.
+  - The limit is 3,000 characters, checked before calling LinkedIn.
+- **Images:**
+  1. Register a synchronous upload (`POST /rest/assets?action=registerUpload`,
+     `SYNCHRONOUS_UPLOAD`), so the image is processed before the post uses it. The newer Images API
+     has no synchronous mode, and a `w_member_social` token can't read image status.
+  2. `PUT` the bytes to the returned upload URL. The token is only ever sent to `*.linkedin.com`.
+  3. Post with `content.media.id = urn:li:image:{id}`.
+
+**Token lifecycle:**
+- **Lifetime:** access tokens last **60 days**. Without partner approval there is no refresh token,
+  so the account becomes `EXPIRED` and shows **Reconnect**. If the member is still signed in to
+  LinkedIn, reconnecting skips the consent screen.
+- **Refresh tokens:** if LinkedIn does issue one (partners), it is stored encrypted and used until
+  its own expiry.
+- **Errors:** 401 → `TOKEN_EXPIRED`, 403 → `PERMISSION_DENIED` (reconnect), 429 → `RATE_LIMITED`.
+- **Rate limits:** LinkedIn documents 150 requests per member per day and 100,000 per app per day.
+- **No revocation:** LinkedIn documents no token revocation endpoint. **Disconnect** deletes
+  FlowPost's stored tokens; the member can remove the app under LinkedIn Settings → Data privacy →
+  Permitted services.
+- **API versions:** each is supported for at least a year. Update `LINKEDIN_API_VERSION` yearly.
+
+**Setup:**
+
+1. Create an app at <https://www.linkedin.com/developers/apps> and associate it with a LinkedIn
+   Page as the portal asks. Complete the Page verification step if it's shown.
+2. Under **Products**, add *Sign In with LinkedIn using OpenID Connect* and *Share on LinkedIn*.
+3. Under **Auth**, add the redirect URL. It must match `LINKEDIN_REDIRECT_URI` exactly.
+   - Development (served through the Vite proxy): `http://localhost:5173/api/v1/social-accounts/linkedin/callback`.
+     LinkedIn's docs ask for HTTPS, so if the portal rejects localhost, use an HTTPS tunnel.
+   - Production: `https://<your-domain>/api/v1/social-accounts/linkedin/callback`. The API refuses
+     to start with a non-HTTPS value in production.
+4. In `backend/.env`, set `LINKEDIN_CLIENT_ID`, `LINKEDIN_CLIENT_SECRET`, `LINKEDIN_REDIRECT_URI` and
+   `TOKEN_ENCRYPTION_KEY`. Setting some LinkedIn values but not all is a startup error.
+
+**Frontend:**
+- **Page:** `/social-accounts` (`pages/social/SocialAccounts.tsx`).
+- **Platform cards** show what's supported, what isn't, and whether LinkedIn is configured.
+- **Account cards** show status, token expiry, last check and publishable content, with **Test
+  connection**, **Reconnect** and **Disconnect**.
+- **Connect results** from the OAuth redirect are shown as an alert.
+- **Roles:** admins and owners connect and disconnect; editors can test; viewers see status only.
+- **Dashboard:** the setup checklist and the "Connected accounts" count use real accounts.
+
+**Tests:** `tests/linkedinProvider.test.ts` exercises the provider against a fake `fetch` that
+mimics LinkedIn's endpoints. It checks request formats, headers, text escaping, the image upload
+flow, host checks and error mapping. `tests/socialAccount.test.ts` covers the HTTP flow with a mock
+provider.
+
+## AI service layer
+
+AI features go through a provider abstraction, so controllers and features never depend on a
+vendor API. OpenAI is the first provider.
+
+```
+integrations/ai/
+  types.ts            AIProvider interface, structured-generation request/result, token usage
+  errors.ts           AIProviderError with kinds (TIMEOUT, RATE_LIMITED, REFUSED, INVALID_OUTPUT, …)
+  openai.provider.ts  OpenAIProvider: Responses API, strict JSON schema, timeouts and retries
+  pricing.ts          Per-model prices for cost estimates
+  schema.ts           Converts zod schemas into strict structured-output JSON schemas
+  registry.ts         getAIProvider() / setAIProvider() (tests)
+  prompts/
+    index.ts          Every prompt: one versioned template per operation
+    schemas.ts        Structured output schemas
+    brandContext.ts   Brand profile → prompt text
+    platforms.ts      Per-platform limits and writing conventions
+    format.ts         Prompt delimiters and injection-safe formatting
+services/ai.service.ts   AIService: brand context, provider call, post-processing, usage tracking
+models/aiUsage.model.ts  AIUsage
+```
+
+**Operations** (`POST /api/v1/workspaces/:workspaceId/ai/...`, editors and above):
+
+| Service function            | Route                  | Returns                                                     |
+| --------------------------- | ---------------------- | ----------------------------------------------------------- |
+| `generateContentStrategy()` | `/content-strategy`    | Summary, pillars, per-platform plan, cadence, KPIs, avoid   |
+| `generateContentIdeas()`    | `/content-ideas`       | Ideas with angle, format, platform, hook, rationale         |
+| `generatePost()`            | `/posts/generate`      | Ready-to-publish text, hook, CTA, hashtags, image idea      |
+| `rewritePost()`             | `/posts/rewrite`       | Rewritten text and a list of changes                        |
+| `generateHashtags()`        | `/hashtags`            | Normalized, de-duplicated hashtags with categories          |
+| `generateHook()`            | `/hooks`               | Opening lines with styles                                   |
+| `generateCTA()`             | `/ctas`                | Calls to action with intent                                 |
+| `adaptForPlatform()`        | `/posts/adapt`         | One version per target platform, with character counts     |
+| Usage summary (admins)      | `GET /usage?days=30`   | Totals and per-operation requests, failures, tokens, cost   |
+
+Every response includes `operation`, `promptVersion`, `model`, `usage` (tokens and estimated cost),
+`brandProfileComplete` and `warnings` (e.g. a result over a platform's character limit).
+
+**Brand context:** every request loads the workspace's brand profile (business, audience, goal,
+voice, keywords, topics, competitors, platforms, frequency) and sends it inside a
+`<brand_profile>` block. Missing fields are skipped. If onboarding isn't finished, generation still
+works and a warning says results may be generic.
+
+**Structured output:** each operation has a zod schema. It is converted to a strict JSON schema for
+OpenAI (`text.format.type = "json_schema"`, `strict: true`), and the response is validated again
+with zod, which also enforces constraints strict mode can't express.
+
+**Prompts:** all prompts live in `integrations/ai/prompts/index.ts`, never in controllers. Each has
+a semantic `version`; bump it whenever instructions, input layout or schema change. The version is
+stored on every usage record. Shared rules tell the model to treat brand and user text as data,
+never invent facts, avoid naming competitors and respect platform limits; user text can't forge the
+prompt's delimiter tags.
+
+**Reliability:**
+- **Timeouts:** `AI_REQUEST_TIMEOUT_MS` per attempt (default 60 s).
+- **Retries:** up to `AI_MAX_RETRIES` (default 2) for timeouts, network errors, 408/409/429/5xx,
+  and output that isn't valid JSON or doesn't match the schema. Backoff is exponential with jitter
+  and honors `Retry-After` (capped at 30 s).
+- **Not retried:** invalid credentials, unknown model, exhausted quota, refusals, content-filter
+  blocks and truncated output.
+- **Errors to clients** are generic (`AI_TIMEOUT`, `AI_REFUSED`, `AI_INVALID_OUTPUT`, …); provider
+  details are logged server-side only. `store: false` asks OpenAI not to retain responses.
+- **Rate limits:** 60 generations per user per hour and 200 per workspace per hour.
+
+**Usage tracking (`AIUsage`):** one record per request, successful or failed: workspace, user,
+operation, provider, model, prompt version, input/output/cached tokens, estimated cost (USD),
+status, error code, duration, attempts and provider request id. Failed requests record tokens
+billed by earlier attempts. Prompts and generated content aren't stored. Records are deleted with
+the workspace.
+
+**Cost estimates** use `integrations/ai/pricing.ts` (OpenAI standard-tier prices, checked
+2026-09-15). Unknown models record `estimatedCostUsd: null`; add new models to the table. Invoices
+remain authoritative.
+
+**Setup:** set `OPENAI_API_KEY` in `backend/.env`. Optional: `OPENAI_MODEL` (default
+`gpt-5.6-terra`), `AI_REQUEST_TIMEOUT_MS`, `AI_MAX_RETRIES`, `AI_MAX_OUTPUT_TOKENS`, and
+`AI_PROVIDER=none` to disable AI. Without a key, AI routes return 503 `AI_NOT_CONFIGURED`.
+
+**Adding a provider:** implement `AIProvider` (structured generation, availability, cost estimate)
+and add a case in `integrations/ai/registry.ts`. Prompts, schemas, the service and routes don't change.
+
+**Tests:** `tests/openaiProvider.test.ts` covers the OpenAI request format, strict schemas, retries,
+timeouts, error mapping, refusals, truncation, pricing and prompt building against a fake `fetch`.
+`tests/ai.test.ts` covers every route with a fake provider: brand context, post-processing,
+usage records for successes and failures, permissions, validation, the usage summary and deletion.
+
+## Content strategy
+
+A workspace's content strategy is generated from its brand profile, edited by the team, and
+activated once it's ready. Code: `models/contentStrategy.model.ts`,
+`validators/contentStrategy.validator.ts`, `services/contentStrategy.service.ts`,
+`routes/contentStrategy.route.ts`; frontend `pages/strategy/ContentStrategy.tsx` and
+`components/strategy/`.
+
+**Sections:** audience analysis (summary and segments), content pillars, recommended topics,
+platform strategy, brand tone, CTA strategy, posting frequency, content formats (shares add up to
+100%) and hashtag approach.
+
+**Structured JSON, validated by the backend.** The content shape is defined once in
+`contentStrategy.validator.ts`, in two modes:
+- **AI mode** is the strict JSON schema sent to OpenAI. Over-long text and lists are trimmed rather
+  than rejected, blank items are dropped and duplicates removed.
+- **Input mode** validates edits with clear messages and hard limits.
+- AI output is also normalized (format shares scaled to 100%, weekly total matched to the platform
+  plan, hashtag range ordered) and then validated in input mode before it's stored. If it still
+  fails, the request returns 502 `AI_INVALID_OUTPUT` and nothing is saved.
+
+**Versions and statuses:**
+
+| Status     | Meaning                                  | Editable by               |
+| ---------- | ---------------------------------------- | ------------------------- |
+| `DRAFT`    | Generated, not in use                    | Editors, admins, owners   |
+| `ACTIVE`   | The workspace's strategy (at most one)   | Admins, owners            |
+| `ARCHIVED` | Previously active ("Previous" in the UI) | Nobody; can be reactivated |
+
+- **Generate** and **Regenerate** always create a new draft version (1, 2, 3… per workspace).
+  Regenerating reuses the source version's timeframe, platforms and focus unless changed, and can
+  include "what should change" instructions. The source version is untouched.
+- **Edit/Save** replaces whole sections (and the name). Each save sends the `revision` it loaded; if
+  someone saved in between, the API returns 409 and the page offers to reload.
+- **Activate** archives the current active strategy and activates the chosen one. A partial unique
+  index (`one_active_strategy_per_workspace`) guarantees a single active strategy even under
+  concurrent requests.
+
+**API** (`/api/v1/workspaces/:workspaceId/content-strategies`):
+
+| Method  | Path                        | Role    | Notes                                         |
+| ------- | --------------------------- | ------- | --------------------------------------------- |
+| `GET`   | `/`                         | Member  | Version list (without content)                |
+| `GET`   | `/active`                   | Member  | The active strategy, or `null`                |
+| `GET`   | `/:strategyId`              | Member  | One version with content                      |
+| `POST`  | `/generate`                 | Editor  | `{ name?, timeframe, platforms?, focus? }`    |
+| `POST`  | `/:strategyId/regenerate`   | Editor  | `{ timeframe?, platforms?, focus?, instructions? }` |
+| `PATCH` | `/:strategyId`              | Editor* | `{ revision, name?, sections? }` (*active: admin) |
+| `POST`  | `/:strategyId/activate`     | Admin   | Archives the previous active strategy         |
+
+Generation uses AI rate limits and records `AIUsage`. The strategy prompt (`2.0.0`) allows 150 s per
+attempt with one retry; the frontend waits up to 5 minutes. Strategies are deleted with the workspace.
+
+**Frontend (`/strategy`):** the first strategy is generated from the empty state. Each section has
+**Edit**, and backend validation errors appear next to the fields. The overview shows the version
+picker (`?version=`), status, Regenerate, Activate, rename, and a warning when the brand profile
+changed after generation.
+
+**Tests:** `tests/contentStrategy.test.ts` covers generation with brand context, output cleanup,
+versions, regeneration, section validation, revision conflicts, activation (including concurrent
+activation and the database index), permissions, workspace isolation and deletion.
+
+## AI Create (posts)
+
+One brief writes one post per platform, and every change is kept as a version. Code:
+`models/post.model.ts`, `models/postVersion.model.ts`, `validators/post.validator.ts`,
+`services/post.service.ts`, `routes/post.route.ts`; frontend `pages/create/AICreate.tsx` and
+`components/create/`.
+
+**A brief** is a topic, optional goal, the platforms, an optional tone and optional instructions.
+One AI request writes every platform in the same call, so the model can deliberately make each
+version different; near-identical drafts come back as a warning. Generation also uses the brand
+profile and the active content strategy (pillars, tone, CTAs, hashtag rules).
+
+**What each platform gets:**
+
+| Platform       | Fields                                                    |
+| -------------- | --------------------------------------------------------- |
+| LinkedIn       | Hook, body, call to action, post text, hashtags            |
+| Instagram      | Caption, hashtags, carousel or reel idea                   |
+| Facebook       | Conversational post, few or no hashtags                    |
+| TikTok         | Hook, scene-by-scene script, caption, hashtags, shoot idea |
+| YouTube Shorts | Title, hook, script, description, hashtags                 |
+
+Fields a platform doesn't use are cleared on the way in and out, so an Instagram caption never
+carries a YouTube title. `text` is always the publishable version.
+
+**Post and PostVersion:** a `Post` holds the platform, the brief, the status
+(`DRAFT`/`READY`/`ARCHIVED`) and a pointer to its current version. Every change appends a
+`PostVersion` — nothing is edited in place, and each version records how it was made, what was
+asked for, and the model and token cost when AI wrote it. The last 50 versions per post are kept.
+
+**Actions** (all append a version):
+
+| Action              | Route                                   | Notes                                     |
+| ------------------- | --------------------------------------- | ----------------------------------------- |
+| Generate            | `POST /posts/generate`                  | One post per platform                     |
+| Regenerate          | `POST /posts/:id/regenerate`            | A new take on the same brief              |
+| Edit                | `PATCH /posts/:id`                      | `{ baseVersion, content }`; 409 if changed |
+| Shorten / Expand    | `POST /posts/:id/refine`                | `{ action }`                              |
+| Change tone         | `POST /posts/:id/refine`                | `{ action: "CHANGE_TONE", tone }`         |
+| Improve hook / CTA  | `POST /posts/:id/refine`                | Rewrites only that part                   |
+| Add / remove emojis | `POST /posts/:id/refine`                | Removal is local — no AI request          |
+| Generate hashtags   | `POST /posts/:id/refine`                | Fresh set for the platform                |
+| Restore             | `POST /posts/:id/versions/:vid/restore` | Brings an old version back as a new one   |
+| Status              | `PATCH /posts/:id/status`               | Archived posts are read-only              |
+
+`GET /posts` lists posts (paged, filterable by platform and status) and `GET /posts/:id` returns a
+post with its full history. Members read; editors and above write; authors or admins delete. AI
+output is validated with the same schema as manual edits before it's stored.
+
+**The page (`/create`)** is a split screen: drafts on the left, then the editor and a platform
+preview side by side, with the refine toolbar above and version history under the preview. Unsaved
+edits block AI actions (which would replace them), the character counter follows the platform's
+limit, and validation errors from the backend appear next to the fields.
+
+**Tests:** `tests/post.test.ts` covers generation per platform, field clearing, duplicate warnings,
+strategy context, versioning through regenerate/edit/refine/restore, conflicts, local emoji
+removal, listing, status rules, permissions, isolation and deletion.
+
 ## Frontend structure
 
 ```
@@ -364,8 +767,6 @@ and AI recommendations. A setup checklist shows until everything the user can ac
 
 ### App pages
 
-| Path                  | Page                                                           |
-| --------------------- | -------------------------------------------------------------- |
 | Path                        | Page                                                            |
 | --------------------------- | --------------------------------------------------------------- |
 | `/dashboard`                | Stats, engagement, upcoming/recent posts, AI recommendations and the setup checklist |
@@ -375,7 +776,10 @@ and AI recommendations. A setup checklist shows until everything the user can ac
 | `/settings/brand-profile`   | Brand onboarding wizard and review (read-only below ADMIN)      |
 | `/settings/account`         | Profile, password and sessions                                  |
 | `/workspaces`, `/workspaces/new` | Workspace management and creation                          |
-| `/create`, `/content`, `/calendar`, `/social-accounts`, `/analytics`, `/autopilot`, `/billing` | Placeholders ("Coming soon") listing the planned features |
+| `/strategy`                 | Generate, edit, version and activate the content strategy |
+| `/social-accounts`          | Connect LinkedIn; account status, test, reconnect and disconnect |
+| `/create`                   | AI Create: brief, per-platform drafts, editor, preview and versions |
+| `/content`, `/calendar`, `/analytics`, `/autopilot`, `/billing` | Placeholders ("Coming soon") listing the planned features |
 
 Old URLs (`/posts`, `/workspace/files`, `/workspace/members`, `/workspace/settings`,
 `/workspace/brand-profile`, `/settings/password`) redirect to the new ones and keep their query

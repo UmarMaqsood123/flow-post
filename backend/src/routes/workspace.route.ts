@@ -1,5 +1,6 @@
 import { Router } from "express";
 import * as BrandProfileController from "../controllers/brandProfile.controller";
+import * as SocialAccountController from "../controllers/socialAccount.controller";
 import * as FileController from "../controllers/file.controller";
 import * as InvitationController from "../controllers/workspaceInvitation.controller";
 import * as WorkspaceController from "../controllers/workspace.controller";
@@ -14,6 +15,9 @@ import {
 } from "../middlewares/upload.middleware";
 import { validate } from "../middlewares/validate.middleware";
 import { requireWorkspace, requireWorkspaceRole } from "../middlewares/workspace.middleware";
+import { AIRouter } from "./ai.route";
+import { ContentStrategyRouter } from "./contentStrategy.route";
+import { PostRouter } from "./post.route";
 import {
   onboardingStepParamsSchema,
   saveOnboardingStepSchema,
@@ -127,6 +131,11 @@ ScopedRouter.delete(
   InvitationController.RevokeInvitation,
 );
 
+// Social accounts — any member can view. Connecting, testing, publishing and disconnecting
+// live in routes/socialAccount.route.ts (/api/v1/social-accounts).
+ScopedRouter.get("/social-accounts/platforms", SocialAccountController.ListSocialPlatforms);
+ScopedRouter.get("/social-accounts", SocialAccountController.ListSocialAccounts);
+
 // Brand profile and onboarding — any member can view; admins and owners edit.
 ScopedRouter.get("/brand-profile", BrandProfileController.GetBrandProfile);
 ScopedRouter.patch(
@@ -172,6 +181,15 @@ ScopedRouter.delete(
   validate({ params: fileParamsSchema }),
   FileController.DeleteFile,
 );
+
+// AI generation — editors generate; admins view usage. Prompts live in integrations/ai/prompts.
+ScopedRouter.use("/ai", AIRouter);
+
+// Content strategy versions — members view; editors generate and edit drafts; admins activate.
+ScopedRouter.use("/content-strategies", ContentStrategyRouter);
+
+// AI Create: posts and their version history.
+ScopedRouter.use("/posts", PostRouter);
 
 WorkspaceRouter.use("/:workspaceId", ScopedRouter);
 

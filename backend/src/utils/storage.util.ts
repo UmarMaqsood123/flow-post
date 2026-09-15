@@ -28,7 +28,20 @@ export interface StorageProvider {
   putObject(input: PutObjectInput): Promise<void>;
   deleteObject(key: string): Promise<void>;
   getPublicUrl(key: string): string;
+  /** Reads a stored object, e.g. to upload media to a social platform. */
+  getObject(key: string): Promise<Buffer>;
 }
+
+/** Collects a storage response body (Node stream, web stream or Blob) into a Buffer. */
+const readBody = async (body: unknown): Promise<Buffer> => {
+  if (body instanceof Blob) return Buffer.from(await body.arrayBuffer());
+  if (body && typeof (body as AsyncIterable<Uint8Array>)[Symbol.asyncIterator] === "function") {
+    const chunks: Buffer[] = [];
+    for await (const chunk of body as AsyncIterable<Uint8Array>) chunks.push(Buffer.from(chunk));
+    return Buffer.concat(chunks);
+  }
+  throw new Error("Unexpected object body from storage");
+};
 
 /** Objects held by the `memory` provider (used by tests). */
 export const memoryObjectStore = new Map<string, StoredObject>();
@@ -51,6 +64,9 @@ const noneProvider: StorageProvider = {
   getPublicUrl: () => {
     throw storageDisabled();
   },
+  getObject: async () => {
+    throw storageDisabled();
+  },
 };
 
 const createMemoryProvider = (): StorageProvider => ({
@@ -65,6 +81,11 @@ const createMemoryProvider = (): StorageProvider => ({
   },
   deleteObject: async (key) => {
     memoryObjectStore.delete(key);
+  },
+  getObject: async (key) => {
+    const object = memoryObjectStore.get(key);
+    if (!object) throw AppError.notFound("File not found in storage");
+    return object.body;
   },
   getPublicUrl: (key) =>
     joinUrl(env.STORAGE_PUBLIC_BASE_URL ?? "https://storage.flowpost.test", key),
@@ -150,6 +171,14 @@ const createOciProvider = (): StorageProvider => {
       });
     },
     getPublicUrl: (key) => joinUrl(baseUrl, key),
+    getObject: async (key) => {
+      const response = await client.getObject({
+        namespaceName: OCI_NAMESPACE,
+        bucketName: OCI_BUCKET,
+        objectName: key,
+      });
+      return readBody(response.value);
+    },
   };
 };
 

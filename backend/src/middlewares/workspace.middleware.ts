@@ -1,4 +1,4 @@
-import type { RequestHandler } from "express";
+import type { Request, RequestHandler } from "express";
 import { WorkspaceStatus, type WorkspaceRoleValue } from "../constants/workspace.constant";
 import { Workspace } from "../models/workspace.model";
 import { WorkspaceMember } from "../models/workspaceMember.model";
@@ -11,6 +11,12 @@ const OBJECT_ID_PATTERN = /^[a-f\d]{24}$/i;
 interface RequireWorkspaceOptions {
   /** Route parameter holding the workspace id. */
   param?: string;
+  /**
+   * Resolves the workspace id another way (a query parameter, or the workspace
+   * that owns a resource). The result is still only a lookup key: access is
+   * granted by membership exactly as for `param`.
+   */
+  getWorkspaceId?: (req: Request) => string | undefined | Promise<string | undefined>;
   /** Allow archived workspaces (only for restore). */
   allowArchived?: boolean;
 }
@@ -30,10 +36,11 @@ export const requireWorkspace =
   ({
     param = "workspaceId",
     allowArchived = false,
+    getWorkspaceId,
   }: RequireWorkspaceOptions = {}): RequestHandler =>
   async (req, _res, next) => {
     const user = getAuthenticatedUser(req);
-    const workspaceId = req.params[param];
+    const workspaceId = getWorkspaceId ? await getWorkspaceId(req) : req.params[param];
 
     if (typeof workspaceId !== "string" || !OBJECT_ID_PATTERN.test(workspaceId)) {
       throw workspaceNotFound();

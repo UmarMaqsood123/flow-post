@@ -1,7 +1,6 @@
-import { ChevronDown, Layers, LogOut, UserRound } from "lucide-react";
-import { useCallback, useRef, useState } from "react";
+import { ChevronDown, CreditCard, Layers, LogOut, Settings, UserRound } from "lucide-react";
 import { Link } from "react-router";
-import useDismiss from "@/hooks/useDismiss";
+import Popover from "@/components/ui/Popover";
 import { paths } from "@/routing/paths";
 import useLogout from "@/services/auth/useLogout";
 import useSession from "@/services/auth/useSession";
@@ -17,54 +16,50 @@ const initialsFor = (name: string) =>
     .map((word) => word[0]?.toUpperCase())
     .join("") || "U";
 
+const LINKS = [
+  { label: "Account settings", to: paths.accountSettings, icon: UserRound },
+  { label: "Workspace settings", to: paths.workspaceSettings, icon: Settings },
+  { label: "All workspaces", to: paths.workspaces, icon: Layers },
+  { label: "Billing", to: paths.billing, icon: CreditCard },
+];
+
 function UserMenu() {
   const { data: user } = useSession();
   const logout = useLogout();
-  const [open, setOpen] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const close = useCallback(() => setOpen(false), []);
-  useDismiss(containerRef, open, close);
 
   if (!user) return null;
 
   return (
-    <div ref={containerRef} className="relative">
-      <button
-        type="button"
-        onClick={() => setOpen((isOpen) => !isOpen)}
-        aria-expanded={open}
-        aria-controls="user-menu-panel"
-        aria-label={`Account menu for ${user.name}`}
-        className="flex items-center gap-2 rounded-full p-1 hover:bg-slate-100 sm:pr-2.5"
-      >
-        <span
-          aria-hidden="true"
-          className="flex size-8 items-center justify-center rounded-full bg-primary text-xs font-semibold text-white"
-        >
-          {initialsFor(user.name)}
-        </span>
-        <span className="hidden max-w-36 truncate text-sm font-medium sm:block">{user.name}</span>
-        <ChevronDown className="hidden size-4 text-muted sm:block" aria-hidden="true" />
-      </button>
-
-      {open && (
-        <div
-          id="user-menu-panel"
-          className="absolute right-0 z-50 mt-2 w-64 rounded-lg border border-line bg-surface p-1.5 shadow-lg"
-        >
+    <Popover
+      label={`Account menu for ${user.name}`}
+      buttonClassName="flex items-center gap-2 rounded-full p-1 hover:bg-slate-100 md:pr-2.5"
+      buttonContent={
+        <>
+          <span
+            aria-hidden="true"
+            className="flex size-8 items-center justify-center rounded-full bg-primary text-xs font-semibold text-white"
+          >
+            {initialsFor(user.name)}
+          </span>
+          <span className="hidden max-w-36 truncate text-sm font-medium md:block">{user.name}</span>
+          <ChevronDown className="hidden size-4 text-muted md:block" aria-hidden="true" />
+        </>
+      }
+      panelClassName="w-64 p-1.5"
+    >
+      {(close) => (
+        <>
           <div className="border-b border-line px-2.5 pt-1.5 pb-2.5">
             <p className="truncate text-sm font-medium">{user.name}</p>
             <p className="truncate text-xs text-muted">{user.email}</p>
           </div>
           <div className="py-1">
-            <Link to={paths.accountSettings} onClick={close} className={itemClass}>
-              <UserRound className="size-4 text-muted" aria-hidden="true" />
-              Account settings
-            </Link>
-            <Link to={paths.workspaces} onClick={close} className={itemClass}>
-              <Layers className="size-4 text-muted" aria-hidden="true" />
-              Workspaces
-            </Link>
+            {LINKS.map(({ label, to, icon: Icon }) => (
+              <Link key={to} to={to} onClick={close} className={itemClass}>
+                <Icon className="size-4 text-muted" aria-hidden="true" />
+                {label}
+              </Link>
+            ))}
           </div>
           <div className="border-t border-line pt-1">
             <button
@@ -77,9 +72,9 @@ function UserMenu() {
               {logout.isPending ? "Logging out…" : "Log out"}
             </button>
           </div>
-        </div>
+        </>
       )}
-    </div>
+    </Popover>
   );
 }
 

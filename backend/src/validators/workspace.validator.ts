@@ -17,7 +17,7 @@ export const isValidTimeZone = (value: string): boolean => {
 };
 
 /** Empty string or null clears the field. */
-const nullableText = (max: number, label: string) =>
+export const nullableText = (max: number, label: string) =>
   z.union([
     z.null(),
     z
@@ -28,7 +28,7 @@ const nullableText = (max: number, label: string) =>
   ]);
 
 /** Only http(s) URLs are accepted, so values are safe to render as links and images. */
-const nullableHttpUrl = (label: string) =>
+export const nullableHttpUrl = (label: string) =>
   z.union([
     z.null(),
     z.literal(""),
@@ -44,7 +44,7 @@ const nullableHttpUrl = (label: string) =>
       ),
   ]);
 
-const emptyToNull = <T>(value: T | "" | null | undefined) =>
+export const emptyToNull = <T>(value: T | "" | null | undefined) =>
   value === "" ? null : (value as T | null | undefined);
 
 const fields = {

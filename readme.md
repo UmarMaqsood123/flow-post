@@ -252,9 +252,62 @@ With `STORAGE_PROVIDER=none` (the default) the upload endpoints return 503. Test
   removes its files too.
 
 Frontend: `components/ui/FileUpload` (single file with preview, used for the workspace logo),
-`components/ui/Dropzone`, the Files page (`/workspace/files`, with All files, Images, Videos and
+`components/ui/Dropzone`, the Media page (`/media`, with All files, Images, Videos and
 Documents tabs), and the `useUploadFile` and
 `useUploadFiles` hooks (with upload progress, like jobs-viewer's `useUploadSingle`).
+
+## Brand profile and onboarding
+
+Each workspace has one `BrandProfile` (workspace-scoped plugin, unique per workspace). It stores:
+business name, website, industry, description, products/services, target audience, target
+locations, primary goal, brand voice (tones and notes), keywords, topics, competitors (name and
+website), preferred platforms and posting frequency. Onboarding status is stored on the same
+document in `onboarding` (`status`, `currentStep`, `completedSteps`, `skippedSteps`, `startedAt`,
+`completedAt`, `completedBy`).
+
+| Method | Endpoint                                                            | Minimum role |
+| ------ | ------------------------------------------------------------------- | ------------ |
+| GET    | `/api/v1/workspaces/:workspaceId/brand-profile`                     | VIEWER       |
+| PATCH  | `/api/v1/workspaces/:workspaceId/brand-profile` (draft save)        | ADMIN        |
+| POST   | `/api/v1/workspaces/:workspaceId/brand-profile/onboarding/steps/:step` | ADMIN     |
+| POST   | `/api/v1/workspaces/:workspaceId/brand-profile/onboarding/complete` | ADMIN        |
+
+- **Enums:**
+  - Goals: `GENERATE_LEADS`, `BRAND_AWARENESS`, `ENGAGEMENT`, `WEBSITE_TRAFFIC`, `SALES`,
+    `FOLLOWER_GROWTH`, `PERSONAL_BRAND`.
+  - Platforms, posting frequencies and tones: see `constants/brandProfile.constant.ts`.
+- **Steps:** `business` → `audience` → `goals` → `voice` → `competitors`, then a review screen.
+  - Required fields are business name, industry, description, products/services, target audience,
+    primary goal, platforms, posting frequency and at least one tone.
+  - Everything else is optional.
+  - Only steps without required fields (competitors) can be skipped (`{ "skipped": true }`).
+- **GET** returns an unsaved profile prefilled from the workspace (`id: null`, status
+  `NOT_STARTED`) until the first save.
+- **PATCH** saves any subset of fields without checking required fields, and can set `currentStep`
+  so the wizard resumes there. Once onboarding is complete, required fields can't be cleared.
+- **Step save** applies only that step's fields and returns 422 with
+  `details: [{ path, message, step }]` if a required field is empty. On success it marks the step
+  done and moves `currentStep` to the first unfinished step (or `review`).
+- **Complete** checks every required field and sets `status: COMPLETED`. Calling it again has no
+  effect.
+- **Security:** the `onboarding` object and `workspace` can't be set through the API (unknown keys
+  are stripped). Deleting a workspace permanently also deletes its brand profile.
+- **AI generation:** not implemented yet. The profile is the input for it.
+
+Frontend:
+
+- **Page:** `/settings/brand-profile` (`pages/workspaces/BrandProfile.tsx`). Owners and admins get
+  the wizard (`components/onboarding/OnboardingWizard.tsx`); editors and viewers get a read-only
+  summary.
+- **Form handling:** the wizard is a single react-hook-form form over `schemas/brandProfile.schema.ts`.
+  Each step validates only its own fields with `trigger()`.
+- **Navigation:** the step is in the URL (`?step=`), so browser Back and Forward work.
+  - The progress indicator lets users revisit finished steps, but not jump ahead.
+  - Previous, the step links and "Save and exit" save a draft when the step has changes.
+- **Resuming:** users go back to the saved step. New workspaces go straight to onboarding, and the
+  dashboard shows a prompt and a checklist item until it's complete.
+- **New UI components:** `TagInput` (list entry) and `ChoiceGroup` (radio or checkbox cards and
+  chips).
 
 ## Frontend structure
 
@@ -269,7 +322,8 @@ frontend/src
 ├── pages/              # auth/, dashboard/, workspaces/, settings/, invitations/, ComingSoon.tsx
 ├── components/
 │   ├── layouts/        # MarketingLayout, RootLayout, AppLayout + app/ (Sidebar, Navbar, UserMenu)
-│   ├── ui/             # Button, TextField, TextAreaField, Dropdown, Alert, Spinner
+│   ├── ui/             # Button, TextField, TextAreaField, Dropdown, TagInput, ChoiceGroup, Alert, Spinner
+│   ├── onboarding/     # OnboardingWizard, OnboardingProgress, BrandProfileReview, steps/
 │   ├── workspace/      # WorkspaceSwitcher, WorkspaceCard, WorkspaceForm, ArchivedWorkspaceRow, badges
 │   ├── dashboard/      # StatCard, GettingStarted
 │   └── shared/ landing/ account/
@@ -277,25 +331,55 @@ frontend/src
 └── index.css           # Tailwind v4 + @theme design tokens
 ```
 
+### Dashboard
+
+Widgets: connected accounts, posts this month, scheduled posts, published posts and engagement
+rate (with trends against last month), a 14-day engagement chart, upcoming posts, recent posts
+and AI recommendations. A setup checklist shows until everything the user can act on is done.
+
+- **Sample data:** analytics and social integrations don't exist yet, so
+  `services/dashboard/dashboardApi.ts` returns generated data from `lib/mockDashboard.ts`, flagged
+  with a "Sample data" notice.
+  - The data is seeded by workspace and day, so it's stable between refreshes.
+  - It's personalised from the brand profile (platforms, topics, keywords, goal).
+  - To switch to real data, replace the body of `getSummary` with an API call returning the
+    `DashboardSummary` shape from `types/dashboard.ts`.
+- **Notifications:** notifications are mocked the same way (`services/notifications`).
+- **State previews (development only):** add `?preview=loading`, `?preview=empty` or
+  `?preview=error` to `/dashboard` to check each state.
+- **Reusable pieces:**
+  - `components/shared`: `AsyncContent` (loading → error → empty → content), `EmptyState`,
+    `ErrorState`, `PlatformBadge`.
+  - `components/ui`: `Skeleton`, `Badge`, `Popover`.
+  - `components/dashboard`: `WidgetCard`, `StatCard`.
+
 ### Layouts
 
 | Layout            | Used for                                                                          |
 | ----------------- | --------------------------------------------------------------------------------- |
 | `MarketingLayout` | Landing page (`/`)                                                                |
 | `RootLayout`      | Login, signup, password reset, email verification and invitation acceptance      |
-| `AppLayout`       | Every signed-in page: sidebar (logo, workspace switcher, navigation), top navbar (page title, user menu) and content. The sidebar becomes a drawer below 1024px. |
+| `AppLayout`       | Every signed-in page: sidebar navigation, header (workspace selector, Quick Create, notifications, user menu) and content. Below 1024px the sidebar becomes a drawer and a bottom tab bar appears. |
+| `SettingsLayout`  | Tabs shared by the Workspace, Brand profile and Account settings pages            |
 
 ### App pages
 
 | Path                  | Page                                                           |
 | --------------------- | -------------------------------------------------------------- |
-| `/dashboard`          | Current workspace, stats and the getting-started checklist     |
-| `/workspaces`         | Workspace management: all workspaces, plus an Archived tab     |
-| `/workspaces/new`     | Create a workspace                                             |
-| `/workspace/members`  | Team members and invitations for the current workspace         |
-| `/workspace/settings` | Settings and archiving for the current workspace               |
-| `/settings/account`   | Profile, password and sessions                                 |
-| `/calendar`, `/posts`, `/analytics` | Placeholders ("Coming soon")                     |
+| Path                        | Page                                                            |
+| --------------------------- | --------------------------------------------------------------- |
+| `/dashboard`                | Stats, engagement, upcoming/recent posts, AI recommendations and the setup checklist |
+| `/media`                    | Images, videos and documents for the current workspace          |
+| `/team`                     | Team members and invitations for the current workspace          |
+| `/settings/workspace`       | Workspace settings and archiving (Settings tabs)                |
+| `/settings/brand-profile`   | Brand onboarding wizard and review (read-only below ADMIN)      |
+| `/settings/account`         | Profile, password and sessions                                  |
+| `/workspaces`, `/workspaces/new` | Workspace management and creation                          |
+| `/create`, `/content`, `/calendar`, `/social-accounts`, `/analytics`, `/autopilot`, `/billing` | Placeholders ("Coming soon") listing the planned features |
+
+Old URLs (`/posts`, `/workspace/files`, `/workspace/members`, `/workspace/settings`,
+`/workspace/brand-profile`, `/settings/password`) redirect to the new ones and keep their query
+string (`legacyRedirects` in `routing/paths.ts`).
 
 **Adding a page**
 

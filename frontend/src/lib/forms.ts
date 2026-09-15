@@ -12,6 +12,10 @@ const isFieldErrorDetail = (value: unknown): value is FieldErrorDetail =>
   typeof (value as FieldErrorDetail).path === "string" &&
   typeof (value as FieldErrorDetail).message === "string";
 
+/** Nested paths such as `competitors.0.name` belong to their top-level field. */
+const belongsToField = (path: string, fields: readonly string[]) =>
+  fields.some((field) => path === field || path.startsWith(`${field}.`));
+
 /**
  * Maps API validation details (`error.details: [{ path, message }]`) onto form
  * fields. Returns true when at least one field error was applied.
@@ -25,7 +29,7 @@ export function applyServerFieldErrors<T extends FieldValues>(
 
   let applied = false;
   for (const detail of error.details) {
-    if (isFieldErrorDetail(detail) && (fields as readonly string[]).includes(detail.path)) {
+    if (isFieldErrorDetail(detail) && belongsToField(detail.path, fields)) {
       setError(detail.path as Path<T>, { type: "server", message: detail.message });
       applied = true;
     }

@@ -1,14 +1,16 @@
 import {
-  BarChart3,
+  Bot,
   CalendarDays,
+  ChartColumn,
+  CreditCard,
   FileText,
-  FolderOpen,
-  Layers,
+  Images,
   LayoutDashboard,
   type LucideIcon,
   Settings,
-  UserRound,
+  Share2,
   Users,
+  WandSparkles,
 } from "lucide-react";
 import { paths } from "@/routing/paths";
 
@@ -20,6 +22,8 @@ export interface NavItem {
   comingSoon?: boolean;
   /** Hidden until the user has a current workspace. */
   requiresWorkspace?: boolean;
+  /** Active for every path under this prefix (e.g. all settings tabs). */
+  matchPrefix?: string;
 }
 
 export interface NavSection {
@@ -27,35 +31,57 @@ export interface NavSection {
   items: NavItem[];
 }
 
+const dashboard: NavItem = { label: "Dashboard", to: paths.dashboard, icon: LayoutDashboard };
+const aiCreate: NavItem = {
+  label: "AI Create",
+  to: paths.aiCreate,
+  icon: WandSparkles,
+  comingSoon: true,
+};
+const content: NavItem = { label: "Content", to: paths.content, icon: FileText, comingSoon: true };
+const calendar: NavItem = {
+  label: "Calendar",
+  to: paths.calendar,
+  icon: CalendarDays,
+  comingSoon: true,
+};
+
 export const NAV_SECTIONS: NavSection[] = [
+  { title: "Overview", items: [dashboard, aiCreate] },
   {
-    title: "Overview",
-    items: [{ label: "Dashboard", to: paths.dashboard, icon: LayoutDashboard }],
+    title: "Publishing",
+    items: [
+      content,
+      calendar,
+      { label: "Social Accounts", to: paths.socialAccounts, icon: Share2, comingSoon: true },
+    ],
   },
   {
-    title: "Content",
+    title: "Growth",
     items: [
-      { label: "Calendar", to: paths.calendar, icon: CalendarDays, comingSoon: true },
-      { label: "Posts", to: paths.posts, icon: FileText, comingSoon: true },
-      { label: "Analytics", to: paths.analytics, icon: BarChart3, comingSoon: true },
+      { label: "Analytics", to: paths.analytics, icon: ChartColumn, comingSoon: true },
+      { label: "Autopilot", to: paths.autopilot, icon: Bot, comingSoon: true },
     ],
   },
   {
     title: "Workspace",
     items: [
-      { label: "Files", to: paths.workspaceFiles, icon: FolderOpen, requiresWorkspace: true },
-      { label: "Team members", to: paths.workspaceMembers, icon: Users, requiresWorkspace: true },
-      {
-        label: "Workspace settings",
-        to: paths.workspaceSettings,
-        icon: Settings,
-        requiresWorkspace: true,
-      },
-      { label: "All workspaces", to: paths.workspaces, icon: Layers },
+      { label: "Media", to: paths.workspaceFiles, icon: Images, requiresWorkspace: true },
+      { label: "Team", to: paths.workspaceMembers, icon: Users, requiresWorkspace: true },
     ],
   },
-  {
-    title: "Account",
-    items: [{ label: "Account settings", to: paths.accountSettings, icon: UserRound }],
-  },
 ];
+
+/** Pinned to the bottom of the sidebar. */
+export const NAV_FOOTER_ITEMS: NavItem[] = [
+  { label: "Billing", to: paths.billing, icon: CreditCard, comingSoon: true },
+  { label: "Settings", to: paths.settings, icon: Settings, matchPrefix: paths.settings },
+];
+
+/** Bottom tab bar on phones; the last slot opens the full navigation drawer. */
+export const MOBILE_TAB_ITEMS: NavItem[] = [dashboard, aiCreate, content, calendar];
+
+export const isNavItemActive = (item: NavItem, pathname: string) => {
+  const prefix = item.matchPrefix ?? item.to;
+  return pathname === prefix || pathname.startsWith(`${prefix}/`);
+};

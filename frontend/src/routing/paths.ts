@@ -9,17 +9,36 @@ export const paths = {
   verifyEmail: "/verify-email",
   acceptInvitation: "/invitations/accept",
 
-  // App (sidebar layout)
+  // App (sidebar layout), in sidebar order
   dashboard: "/dashboard",
+  aiCreate: "/create",
+  content: "/content",
   calendar: "/calendar",
-  posts: "/posts",
+  socialAccounts: "/social-accounts",
   analytics: "/analytics",
+  autopilot: "/autopilot",
+  /** Media library (images, videos, documents). */
+  workspaceFiles: "/media",
+  /** Team members and invitations. */
+  workspaceMembers: "/team",
+  billing: "/billing",
+  settings: "/settings",
+  workspaceSettings: "/settings/workspace",
+  /** Brand onboarding wizard; `?step=` selects the step. */
+  brandProfile: "/settings/brand-profile",
+  accountSettings: "/settings/account",
   workspaces: "/workspaces",
   createWorkspace: "/workspaces/new",
-  workspaceSettings: "/workspace/settings",
-  workspaceMembers: "/workspace/members",
-  workspaceFiles: "/workspace/files",
-  accountSettings: "/settings/account",
   /** Legacy path — redirects to account settings. */
   changePassword: "/settings/password",
 } as const;
+
+/** Old URLs that still work (bookmarks, earlier links) and where they now point. */
+export const legacyRedirects: { from: string; to: string }[] = [
+  { from: "/posts", to: paths.content },
+  { from: "/workspace/files", to: paths.workspaceFiles },
+  { from: "/workspace/members", to: paths.workspaceMembers },
+  { from: "/workspace/settings", to: paths.workspaceSettings },
+  { from: "/workspace/brand-profile", to: paths.brandProfile },
+  { from: paths.changePassword, to: paths.accountSettings },
+];

@@ -1,65 +1,127 @@
-import { CalendarClock, Link2, MailPlus, Users } from "lucide-react";
-import { Link } from "react-router";
+import { CalendarClock, CalendarPlus, Layers, Plus, Send, WandSparkles } from "lucide-react";
+import { Link, useSearchParams } from "react-router";
+import AiRecommendationsWidget from "@/components/dashboard/AiRecommendationsWidget";
+import DashboardStats from "@/components/dashboard/DashboardStats";
+import EngagementWidget from "@/components/dashboard/EngagementWidget";
 import GettingStarted, { type ChecklistStep } from "@/components/dashboard/GettingStarted";
-import StatCard from "@/components/dashboard/StatCard";
+import PostsWidget from "@/components/dashboard/PostsWidget";
+import SampleDataNotice from "@/components/dashboard/SampleDataNotice";
+import EmptyState from "@/components/shared/EmptyState";
+import ErrorState from "@/components/shared/ErrorState";
 import PageHeader from "@/components/shared/PageHeader";
 import Alert from "@/components/ui/Alert";
 import Button from "@/components/ui/Button";
 import { buttonStyles } from "@/components/ui/buttonStyles";
-import RoleBadge from "@/components/workspace/RoleBadge";
-import WorkspaceAvatar from "@/components/workspace/WorkspaceAvatar";
+import { getOnboardingProgress } from "@/lib/brandProfile";
+import { getGreeting } from "@/lib/format";
 import { getErrorMessage } from "@/lib/forms";
 import { hasMinimumRole } from "@/lib/workspaceRoles";
 import { paths } from "@/routing/paths";
 import useResendVerification from "@/services/auth/useResendVerification";
 import useSession from "@/services/auth/useSession";
+import useBrandProfile from "@/services/brandProfile/useBrandProfile";
+import { toDashboardPreview } from "@/services/dashboard/dashboardApi";
+import useDashboardSummary from "@/services/dashboard/useDashboardSummary";
 import useCurrentWorkspace from "@/services/workspace/useCurrentWorkspace";
 import useWorkspaceInvitations from "@/services/workspace/useWorkspaceInvitations";
 import useWorkspaceMembers from "@/services/workspace/useWorkspaceMembers";
-import type { WorkspaceSummary } from "@/types/workspace";
+import type { DashboardSummary } from "@/types/dashboard";
 
 const smallButton = (variant: "primary" | "secondary") => buttonStyles(variant, "px-3 py-1.5");
 
-function CurrentWorkspaceCard({ summary: { workspace, role } }: { summary: WorkspaceSummary }) {
+interface AnalyticsProps {
+  summary?: DashboardSummary;
+  isLoading: boolean;
+  timeZone?: string;
+  /** Resets per-workspace widget state such as dismissed recommendations. */
+  workspaceKey: string;
+}
+
+function DashboardAnalytics({ summary, isLoading, timeZone, workspaceKey }: AnalyticsProps) {
   return (
-    <div className="flex flex-col gap-4 rounded-xl border border-line bg-surface p-5 sm:flex-row sm:items-center">
-      <WorkspaceAvatar name={workspace.name} logo={workspace.logo} size="lg" />
-      <div className="min-w-0 flex-1">
-        <p className="text-xs font-medium text-muted">Current workspace</p>
-        <h2 className="truncate text-xl font-semibold">{workspace.name}</h2>
-        <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted">
-          <RoleBadge role={role} />
-          {workspace.industry && <span>{workspace.industry}</span>}
-          <span>{workspace.timezone.replaceAll("_", " ")}</span>
-        </p>
+    <>
+      {summary?.isSample && <SampleDataNotice />}
+      <DashboardStats stats={summary?.stats} isLoading={isLoading} />
+      {/* items-start: each card keeps its own height instead of stretching to the tallest. */}
+      <div className="grid items-start gap-6 lg:grid-cols-3">
+        <EngagementWidget
+          className="lg:col-span-2"
+          engagement={summary?.engagement}
+          rate={summary?.stats.engagementRate}
+          isLoading={isLoading}
+        />
+        <AiRecommendationsWidget
+          key={workspaceKey}
+          recommendations={summary?.recommendations}
+          isLoading={isLoading}
+        />
       </div>
-      <div className="flex gap-2">
-        <Link to={paths.workspaceMembers} className={buttonStyles("secondary")}>
-          Team
-        </Link>
-        <Link to={paths.workspaceSettings} className={buttonStyles("secondary")}>
-          Settings
-        </Link>
+      <div className="grid gap-6 lg:grid-cols-2">
+        <PostsWidget
+          variant="upcoming"
+          title="Upcoming posts"
+          description="Next in your publishing queue"
+          icon={CalendarClock}
+          posts={summary?.upcomingPosts}
+          isLoading={isLoading}
+          timeZone={timeZone}
+          viewAllTo={paths.calendar}
+          emptyTitle="Nothing scheduled"
+          emptyDescription="Schedule posts to keep your channels active while you focus elsewhere."
+          emptyAction={
+            <Link to={paths.calendar} className={smallButton("secondary")}>
+              Schedule a post
+            </Link>
+          }
+        />
+        <PostsWidget
+          variant="recent"
+          title="Recent posts"
+          description="Latest published and how they did"
+          icon={Send}
+          posts={summary?.recentPosts}
+          isLoading={isLoading}
+          viewAllTo={paths.content}
+          emptyTitle="No posts published yet"
+          emptyDescription="Published posts and their engagement will show up here."
+          emptyAction={
+            <Link to={paths.aiCreate} className={smallButton("primary")}>
+              Create with AI
+            </Link>
+          }
+        />
       </div>
-    </div>
+    </>
   );
 }
 
 function Dashboard() {
   const { data: user } = useSession();
+  const [searchParams] = useSearchParams();
+  // Development only: ?preview=loading|empty|error shows each dashboard state.
+  const preview = import.meta.env.DEV ? toDashboardPreview(searchParams.get("preview")) : undefined;
   const resendVerification = useResendVerification();
-  const { current, isPending: workspacesPending, isError, error } = useCurrentWorkspace();
-  const workspaceId = current?.workspace.id;
-  const canManageTeam = current ? hasMinimumRole(current.role, "ADMIN") : false;
-  const members = useWorkspaceMembers(workspaceId);
-  const invitations = useWorkspaceInvitations(workspaceId, canManageTeam);
+  const workspaces = useCurrentWorkspace();
+  const { current } = workspaces;
+  const workspace = current?.workspace;
+  const isAdmin = current ? hasMinimumRole(current.role, "ADMIN") : false;
+  const members = useWorkspaceMembers(workspace?.id);
+  const invitations = useWorkspaceInvitations(workspace?.id, isAdmin);
+  const brandProfile = useBrandProfile(workspace?.id);
+  const summary = useDashboardSummary({
+    workspace,
+    brandProfile: brandProfile.data,
+    ready: !brandProfile.isPending,
+    canEditBrandProfile: isAdmin,
+    preview,
+  });
 
   // ProtectedRoute guarantees a user; this narrows the type.
   if (!user) return null;
 
   const firstName = user.name.split(/\s+/)[0] || user.name;
-  const memberCount = members.data?.length;
-  const pendingCount = canManageTeam ? invitations.data?.length : undefined;
+  const onboarding = brandProfile.data?.onboarding;
+  const progress = brandProfile.data ? getOnboardingProgress(brandProfile.data) : null;
 
   const steps: ChecklistStep[] = [
     {
@@ -89,50 +151,122 @@ function Dashboard() {
       ),
     },
     {
+      label: "Set up your brand profile",
+      description:
+        onboarding?.status === "IN_PROGRESS" && progress
+          ? `${progress.done} of ${progress.total} steps done. Pick up where you left off.`
+          : "Tell FlowPost about your business, audience, goals and brand voice.",
+      done: onboarding?.status === "COMPLETED",
+      action: isAdmin ? (
+        <Link to={paths.brandProfile} className={smallButton("primary")}>
+          {onboarding?.status === "IN_PROGRESS" ? "Continue" : "Start"}
+        </Link>
+      ) : undefined,
+    },
+    {
       label: "Invite a teammate",
       description: "Bring in admins, editors or viewers to collaborate.",
-      done: (memberCount ?? 0) > 1 || (pendingCount ?? 0) > 0,
-      action:
-        current && canManageTeam ? (
-          <Link to={paths.workspaceMembers} className={smallButton("secondary")}>
-            Invite
-          </Link>
-        ) : undefined,
+      done: (members.data?.length ?? 0) > 1 || (invitations.data?.length ?? 0) > 0,
+      action: isAdmin ? (
+        <Link to={paths.workspaceMembers} className={smallButton("secondary")}>
+          Invite
+        </Link>
+      ) : undefined,
     },
     {
       label: "Connect your social accounts",
-      description: "LinkedIn, Instagram, Facebook, TikTok and YouTube.",
-      done: false,
-      comingSoon: true,
-    },
-    {
-      label: "Schedule your first post",
-      description: "Draft with AI, review and publish on a schedule.",
+      description: "LinkedIn, Instagram, Facebook, X, TikTok, YouTube and more.",
       done: false,
       comingSoon: true,
     },
   ];
+  // Hide the checklist once everything this user can act on is done (and data has loaded).
+  const checklistLoaded = !current || (!brandProfile.isPending && !members.isPending);
+  const showChecklist =
+    checklistLoaded &&
+    steps.some((step) => !step.comingSoon && !step.done && (step.action || !current));
+
+  const renderBody = () => {
+    if (workspaces.isPending) {
+      return <DashboardAnalytics isLoading workspaceKey="loading" />;
+    }
+    if (workspaces.isError) {
+      return (
+        <ErrorState
+          title="We couldn't load your workspaces"
+          message={getErrorMessage(workspaces.error)}
+          onRetry={() => void workspaces.refetch()}
+          isRetrying={workspaces.isRefetching}
+        />
+      );
+    }
+    if (!workspace) {
+      return (
+        <>
+          <EmptyState
+            icon={Layers}
+            title="Create your first workspace"
+            description="Workspaces keep each brand's posts, team and settings separate. Create one for every brand you manage."
+            action={
+              <Link to={paths.createWorkspace} className={buttonStyles("primary")}>
+                <Plus className="size-4" aria-hidden="true" />
+                Create workspace
+              </Link>
+            }
+          />
+          <GettingStarted steps={steps} />
+        </>
+      );
+    }
+    return (
+      <>
+        {showChecklist && <GettingStarted steps={steps} />}
+        {summary.isError ? (
+          <ErrorState
+            title="We couldn't load your dashboard"
+            message={getErrorMessage(summary.error)}
+            onRetry={() => void summary.refetch()}
+            isRetrying={summary.isRefetching}
+          />
+        ) : (
+          <DashboardAnalytics
+            summary={summary.data}
+            isLoading={summary.isPending}
+            timeZone={workspace.timezone}
+            workspaceKey={workspace.id}
+          />
+        )}
+      </>
+    );
+  };
 
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
-        title={`Welcome back, ${firstName}`}
+        title={`${getGreeting()}, ${firstName}`}
         description={
-          current ? (
+          workspace ? (
             <>
               Here&apos;s what&apos;s happening in{" "}
-              <span className="font-medium text-ink">{current.workspace.name}</span>.
+              <span className="font-medium text-ink">{workspace.name}</span>.
             </>
           ) : (
             "Let's get your first workspace set up."
           )
         }
         actions={
-          current ? (
-            <Link to={paths.workspaces} className={buttonStyles("secondary")}>
-              Manage workspaces
-            </Link>
-          ) : undefined
+          workspace && (
+            <>
+              <Link to={paths.calendar} className={buttonStyles("secondary")}>
+                <CalendarPlus className="size-4" aria-hidden="true" />
+                Schedule post
+              </Link>
+              <Link to={paths.aiCreate} className={buttonStyles("primary")}>
+                <WandSparkles className="size-4" aria-hidden="true" />
+                Create with AI
+              </Link>
+            </>
+          )
         }
       />
 
@@ -148,57 +282,7 @@ function Dashboard() {
         </Alert>
       )}
 
-      {workspacesPending && (
-        <div aria-hidden="true" className="h-28 animate-pulse rounded-xl bg-slate-100" />
-      )}
-      {isError && <Alert variant="error">{getErrorMessage(error)}</Alert>}
-      {!workspacesPending && !isError && current && <CurrentWorkspaceCard summary={current} />}
-      {!workspacesPending && !isError && !current && (
-        <div className="rounded-xl border border-dashed border-line p-8 text-center">
-          <h2 className="text-lg font-semibold">Create your first workspace</h2>
-          <p className="mx-auto mt-1 max-w-md text-sm text-muted">
-            Workspaces keep each brand&apos;s posts, team and settings separate. Create one for
-            every brand you manage.
-          </p>
-          <Link to={paths.createWorkspace} className={buttonStyles("primary", "mt-5")}>
-            Create workspace
-          </Link>
-        </div>
-      )}
-
-      {current && (
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <StatCard
-            label="Team members"
-            value={memberCount ?? "—"}
-            icon={Users}
-            hint="People with access to this workspace"
-            to={paths.workspaceMembers}
-          />
-          <StatCard
-            label="Pending invitations"
-            value={canManageTeam ? (pendingCount ?? "—") : "—"}
-            icon={MailPlus}
-            hint={canManageTeam ? "Waiting to be accepted" : "Visible to admins and owners"}
-            to={canManageTeam ? paths.workspaceMembers : undefined}
-          />
-          <StatCard
-            label="Scheduled posts"
-            value={0}
-            icon={CalendarClock}
-            hint="Scheduling is coming soon"
-            to={paths.calendar}
-          />
-          <StatCard
-            label="Connected accounts"
-            value={0}
-            icon={Link2}
-            hint="Integrations are coming soon"
-          />
-        </div>
-      )}
-
-      <GettingStarted steps={steps} />
+      {renderBody()}
     </div>
   );
 }

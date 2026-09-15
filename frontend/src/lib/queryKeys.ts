@@ -18,6 +18,11 @@ export const queryKeys = {
     invitationPreview: (token: string) => [...WORKSPACES, "invitation-preview", token] as const,
     /** Prefix for every file list in a workspace (all kinds). */
     files: (workspaceId: string) => [...workspaceDetail(workspaceId), "files"] as const,
+    dashboard: (workspaceId: string) => [...workspaceDetail(workspaceId), "dashboard"] as const,
+    notifications: (workspaceId: string) =>
+      [...workspaceDetail(workspaceId), "notifications"] as const,
+    brandProfile: (workspaceId: string) =>
+      [...workspaceDetail(workspaceId), "brand-profile"] as const,
   },
   health: {
     all: ["health"] as const,

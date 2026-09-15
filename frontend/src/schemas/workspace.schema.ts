@@ -11,7 +11,7 @@ const isHttpUrl = (value: string) => {
   }
 };
 
-const optionalUrl = (label: string) =>
+export const optionalUrl = (label: string) =>
   z
     .string()
     .trim()

@@ -17,6 +17,7 @@ import { WorkspaceInvitation } from "../models/workspaceInvitation.model";
 import { WorkspaceMember } from "../models/workspaceMember.model";
 import { AppError } from "../utils/appError.util";
 import type { WorkspaceContext } from "../utils/workspaceContext.util";
+import * as BrandProfileService from "./brandProfile.service";
 import * as FileService from "./file.service";
 import type { CreateWorkspaceInput, UpdateWorkspaceInput } from "../validators/workspace.validator";
 
@@ -160,6 +161,7 @@ export const deleteWorkspacePermanently = async (
     WorkspaceMember.deleteMany({ workspace: workspaceId }),
     WorkspaceInvitation.deleteMany({ workspace: workspaceId }),
     FileService.deleteAllWorkspaceFiles(workspaceId),
+    BrandProfileService.deleteWorkspaceBrandProfile(workspaceId),
     User.updateMany({ activeWorkspace: workspaceId }, { $set: { activeWorkspace: null } }),
   ]);
 

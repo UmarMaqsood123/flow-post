@@ -1,4 +1,5 @@
 import { Router } from "express";
+import * as BrandProfileController from "../controllers/brandProfile.controller";
 import * as FileController from "../controllers/file.controller";
 import * as InvitationController from "../controllers/workspaceInvitation.controller";
 import * as WorkspaceController from "../controllers/workspace.controller";
@@ -13,6 +14,11 @@ import {
 } from "../middlewares/upload.middleware";
 import { validate } from "../middlewares/validate.middleware";
 import { requireWorkspace, requireWorkspaceRole } from "../middlewares/workspace.middleware";
+import {
+  onboardingStepParamsSchema,
+  saveOnboardingStepSchema,
+  updateBrandProfileSchema,
+} from "../validators/brandProfile.validator";
 import { fileParamsSchema, listFilesQuerySchema } from "../validators/file.validator";
 import {
   changeMemberRoleSchema,
@@ -119,6 +125,26 @@ ScopedRouter.delete(
   requireWorkspaceRole(WorkspaceRole.ADMIN),
   validate({ params: invitationParamsSchema }),
   InvitationController.RevokeInvitation,
+);
+
+// Brand profile and onboarding — any member can view; admins and owners edit.
+ScopedRouter.get("/brand-profile", BrandProfileController.GetBrandProfile);
+ScopedRouter.patch(
+  "/brand-profile",
+  requireWorkspaceRole(WorkspaceRole.ADMIN),
+  validate({ body: updateBrandProfileSchema }),
+  BrandProfileController.UpdateBrandProfile,
+);
+ScopedRouter.post(
+  "/brand-profile/onboarding/steps/:step",
+  requireWorkspaceRole(WorkspaceRole.ADMIN),
+  validate({ params: onboardingStepParamsSchema, body: saveOnboardingStepSchema }),
+  BrandProfileController.SaveOnboardingStep,
+);
+ScopedRouter.post(
+  "/brand-profile/onboarding/complete",
+  requireWorkspaceRole(WorkspaceRole.ADMIN),
+  BrandProfileController.CompleteOnboarding,
 );
 
 // Files — any member can view; editors upload; uploaders or admins delete (rules in the service).

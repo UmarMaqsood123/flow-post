@@ -40,7 +40,8 @@ function CreateWorkspace() {
           submitLabel="Create workspace"
           onSubmit={async (values) => {
             await createWorkspace.mutateAsync(values);
-            navigate(paths.dashboard);
+            // New workspaces go straight into brand onboarding.
+            navigate(paths.brandProfile);
           }}
         />
       </div>

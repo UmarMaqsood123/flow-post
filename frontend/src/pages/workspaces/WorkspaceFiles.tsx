@@ -173,7 +173,7 @@ function WorkspaceFiles() {
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
-        title="Files"
+        title="Media"
         description={`Images, videos and documents for ${current.workspace.name}.`}
       />
 

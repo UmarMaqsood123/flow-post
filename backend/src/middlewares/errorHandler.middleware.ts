@@ -81,6 +81,12 @@ const normalizeError = (error: unknown): AppError => {
         code: ErrorCode.PAYLOAD_TOO_LARGE,
       });
     }
+    // Other client-side body problems (unsupported charset or encoding, aborted
+    // uploads) keep their 4xx status instead of being reported as server errors.
+    const status = (error as { status?: unknown }).status;
+    if (typeof status === "number" && status >= 400 && status < 500) {
+      return AppError.badRequest("The request body couldn't be read");
+    }
   }
 
   return AppError.internal("Internal server error", error);

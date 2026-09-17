@@ -13,8 +13,9 @@ import {
 
 /**
  * /api/v1/workspaces/:workspaceId/content-strategies — mounted on the workspace-scoped
- * router. Any member can view; editors generate and edit drafts; admins activate
- * and edit the active strategy (checked in the service).
+ * router. Any member can view; editors generate, edit and delete drafts; admins
+ * activate, and edit or delete the active strategy and previous versions
+ * (checked in the service).
  */
 const ContentStrategyRouter = Router({ mergeParams: true });
 
@@ -39,6 +40,12 @@ ContentStrategyRouter.patch(
   editor,
   validate({ params, body: updateContentStrategySchema }),
   ContentStrategyController.UpdateContentStrategy,
+);
+ContentStrategyRouter.delete(
+  "/:strategyId",
+  editor,
+  validate({ params }),
+  ContentStrategyController.DeleteContentStrategy,
 );
 ContentStrategyRouter.post(
   "/:strategyId/regenerate",

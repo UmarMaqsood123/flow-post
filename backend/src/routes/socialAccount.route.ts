@@ -7,6 +7,8 @@ import { validate } from "../middlewares/validate.middleware";
 import { requireWorkspace, requireWorkspaceRole } from "../middlewares/workspace.middleware";
 import { findAccountWorkspaceId } from "../services/socialAccount.service";
 import {
+  chooseConnectionTargetSchema,
+  connectionDraftParamsSchema,
   connectSocialAccountQuerySchema,
   oauthCallbackQuerySchema,
   publishSocialPostSchema,
@@ -53,6 +55,28 @@ SocialAccountRouter.get(
   SocialAccountController.StartSocialConnection,
 );
 
+// Finishing a connection that granted several accounts: list them, then pick one.
+SocialAccountRouter.get(
+  "/connections/:draftId",
+  validate({ params: connectionDraftParamsSchema, query: connectSocialAccountQuerySchema }),
+  requireQueryWorkspace,
+  requireWorkspaceRole(WorkspaceRole.ADMIN),
+  SocialAccountController.ListConnectionChoices,
+);
+
+SocialAccountRouter.post(
+  "/connections/:draftId",
+  validate({
+    params: connectionDraftParamsSchema,
+    query: connectSocialAccountQuerySchema,
+    body: chooseConnectionTargetSchema,
+  }),
+  requireQueryWorkspace,
+  requireWorkspaceRole(WorkspaceRole.ADMIN),
+  limit.connect,
+  SocialAccountController.ChooseConnectionTarget,
+);
+
 SocialAccountRouter.delete(
   "/:accountId",
   validate({ params: socialAccountIdParamsSchema }),
@@ -70,11 +94,13 @@ SocialAccountRouter.post(
   SocialAccountController.TestSocialAccount,
 );
 
+// Immediate publish outside the post workflow (no approval, no Autopilot pause),
+// so it's limited to admins and still bound by the plan's publishing quota.
 SocialAccountRouter.post(
   "/:accountId/posts",
   validate({ params: socialAccountIdParamsSchema, body: publishSocialPostSchema }),
   requireAccountWorkspace,
-  requireWorkspaceRole(WorkspaceRole.EDITOR),
+  requireWorkspaceRole(WorkspaceRole.ADMIN),
   limit.publish,
   SocialAccountController.PublishSocialPost,
 );

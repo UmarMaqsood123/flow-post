@@ -210,7 +210,7 @@ function Dropdown<T extends string>({
         onClick={() => (open ? closeMenu() : openMenu())}
         onKeyDown={searchable && open ? undefined : handleKeyDown}
         className={cn(
-          "flex w-full items-center justify-between gap-2 rounded-md border border-line bg-surface text-left transition-shadow outline-none",
+          "flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-line bg-surface text-left transition-shadow outline-none",
           "focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/20",
           "disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-muted",
           size === "sm" ? "px-2.5 py-1.5 text-sm" : "px-3 py-2 text-sm",

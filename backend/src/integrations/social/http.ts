@@ -20,10 +20,16 @@ export const providerFetch = async (
   try {
     return await fetchImpl(url, { ...init, signal: AbortSignal.timeout(timeoutMs) });
   } catch (cause) {
+    // A timeout may have been cut off after the platform received the request,
+    // so the caller can't assume nothing happened.
+    const timedOut =
+      cause instanceof Error && (cause.name === "TimeoutError" || cause.name === "AbortError");
     throw new SocialProviderError(
       "PROVIDER_ERROR",
-      `Couldn't reach ${provider.displayName}. Please try again.`,
-      { platform: provider.platform, retryable: true, cause },
+      timedOut
+        ? `${provider.displayName} took too long to respond.`
+        : `Couldn't reach ${provider.displayName}. Please try again.`,
+      { platform: provider.platform, retryable: true, outcomeUnknown: timedOut, cause },
     );
   }
 };
@@ -43,3 +49,10 @@ export const retryAfterSeconds = (response: Response): number | undefined => {
 
 export const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
+
+/**
+ * A view over bytes for a request body, without copying. Video uploads can be
+ * hundreds of megabytes; `new Uint8Array(buffer)` would duplicate them in memory.
+ */
+export const asBody = (bytes: Uint8Array): Uint8Array<ArrayBuffer> =>
+  new Uint8Array(bytes.buffer as ArrayBuffer, bytes.byteOffset, bytes.byteLength);

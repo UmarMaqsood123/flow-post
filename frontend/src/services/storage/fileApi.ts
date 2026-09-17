@@ -1,6 +1,6 @@
 import type { AxiosProgressEvent } from "axios";
 import { api } from "@/lib/api";
-import type { FileKind, UploadedFile } from "@/types/file";
+import type { FileKind, MediaDetails, UploadedFile } from "@/types/file";
 
 const filesPath = (workspaceId: string) => `/workspaces/${encodeURIComponent(workspaceId)}/files`;
 
@@ -48,13 +48,18 @@ export const fileApi = {
   uploadMany: async ({
     workspaceId,
     files,
+    details,
     onProgress,
   }: {
     workspaceId: string;
     files: File[];
+    /** One entry per file, in the same order. */
+    details?: MediaDetails[];
     onProgress?: ProgressHandler;
   }) => {
     const body = new FormData();
+    // Sent before the files so it's parsed first; the server lines entries up by index.
+    if (details) body.append("metadata", JSON.stringify(details));
     for (const file of files) body.append("files", file);
     return (
       await api.post<{ files: UploadedFile[] }, FormData>(

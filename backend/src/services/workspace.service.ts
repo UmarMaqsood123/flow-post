@@ -21,9 +21,18 @@ import * as AIService from "./ai.service";
 import * as BrandProfileService from "./brandProfile.service";
 import * as ContentStrategyService from "./contentStrategy.service";
 import * as PostService from "./post.service";
+import * as AnalyticsService from "./analytics.service";
+import * as EntitlementService from "./entitlement.service";
+import * as AutopilotService from "./autopilot.service";
+import * as PerformanceInsightsService from "./performanceInsights.service";
+import * as PublishingService from "./publishing.service";
 import * as SocialAccountService from "./socialAccount.service";
 import * as FileService from "./file.service";
 import type { CreateWorkspaceInput, UpdateWorkspaceInput } from "../validators/workspace.validator";
+import { Post } from "../models/post.model";
+import { AutopilotSettings } from "../models/autopilotSettings.model";
+import { PostStatus } from "../constants/post.constant";
+import * as NotificationService from "./notification.service";
 
 export interface WorkspaceSummary {
   workspace: PublicWorkspace;
@@ -73,7 +82,12 @@ export const createWorkspace = async (
   user: UserDocument,
   input: CreateWorkspaceInput,
 ): Promise<WorkspaceSummary> => {
-  const workspace = await Workspace.create({ ...input, createdBy: user._id });
+  await EntitlementService.assertCanCreateWorkspace(user._id);
+  const workspace = await Workspace.create({
+    ...input,
+    createdBy: user._id,
+    billingOwner: user._id,
+  });
 
   try {
     await WorkspaceMember.create({
@@ -122,7 +136,37 @@ export const archiveWorkspace = async ({ workspace, user }: WorkspaceContext): P
     { $set: { status: InvitationStatus.REVOKED, revokedAt: now } },
   );
   await User.updateMany({ activeWorkspace: workspace._id }, { $set: { activeWorkspace: null } });
-  logger.info({ userId: user.id, workspaceId: workspace.id }, "Workspace archived");
+
+  // Nobody can see or stop an archived workspace's queue, so nothing in it may go out.
+  const scheduled = await Post.find({
+    workspace: workspace._id,
+    status: PostStatus.SCHEDULED,
+  });
+  for (const post of scheduled) {
+    try {
+      await PublishingService.cancelLiveSchedule(post, user._id);
+      post.status = PostStatus.READY;
+      await post.save();
+    } catch (error) {
+      // Already sending: it finishes, and the worker refuses anything after this.
+      logger.warn({ err: error, postId: post.id }, "Couldn't unschedule a post while archiving");
+    }
+  }
+  await AutopilotSettings.updateOne(
+    { workspace: workspace._id, status: "ACTIVE" },
+    {
+      $set: {
+        status: "PAUSED",
+        pausedAt: now,
+        pausedBy: user._id,
+        pauseReason: "The workspace was archived.",
+      },
+    },
+  );
+  logger.info(
+    { userId: user.id, workspaceId: workspace.id, unscheduled: scheduled.length },
+    "Workspace archived",
+  );
 };
 
 export const restoreWorkspace = async ({
@@ -130,6 +174,10 @@ export const restoreWorkspace = async ({
   member,
   user,
 }: WorkspaceContext): Promise<WorkspaceSummary> => {
+  // An archived workspace doesn't count toward the plan; restoring one does.
+  if (workspace.status !== WorkspaceStatus.ACTIVE) {
+    await EntitlementService.assertCanCreateWorkspace(EntitlementService.billingOwnerOf(workspace));
+  }
   workspace.status = WorkspaceStatus.ACTIVE;
   workspace.archivedAt = null;
   workspace.archivedBy = null;
@@ -170,6 +218,11 @@ export const deleteWorkspacePermanently = async (
     AIService.deleteWorkspaceAIUsage(workspaceId),
     ContentStrategyService.deleteWorkspaceStrategies(workspaceId),
     PostService.deleteWorkspacePosts(workspaceId),
+    PublishingService.deleteWorkspacePublishing(workspaceId),
+    AnalyticsService.deleteWorkspaceAnalytics(workspaceId),
+    PerformanceInsightsService.deleteWorkspaceInsights(workspaceId),
+    AutopilotService.deleteWorkspaceAutopilot(workspaceId),
+    NotificationService.deleteWorkspaceNotifications(workspaceId),
     User.updateMany({ activeWorkspace: workspaceId }, { $set: { activeWorkspace: null } }),
   ]);
 

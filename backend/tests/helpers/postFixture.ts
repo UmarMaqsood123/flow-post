@@ -7,8 +7,6 @@ export const postContent = (overrides: Partial<PostContent> = {}): PostContent =
   body: "Here's why grind size matters more than the machine.",
   text: "Fresh beans taste better.\n\nHere's why grind size matters more than the machine.\n\nShop the roast [link]\n\n#coffee",
   cta: "Shop the roast [link]",
-  script: [],
-  visualIdea: null,
   hashtags: ["#coffee"],
   ...overrides,
 });
@@ -21,8 +19,6 @@ export const postDraft = (
   platform,
   ...postContent({
     title: `${platform} title`,
-    visualIdea: `${platform} visual`,
-    script: [{ scene: "Close-up of the grinder", voiceover: "Start with fresh beans." }],
     text: `${platform} text about fresh coffee`,
     ...overrides,
   }),

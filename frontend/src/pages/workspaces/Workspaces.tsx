@@ -64,7 +64,7 @@ function Workspaces() {
             aria-controls={`panel-${id}`}
             onClick={() => setSearchParams(id === "archived" ? { tab: "archived" } : {})}
             className={cn(
-              "-mb-px flex items-center gap-2 border-b-2 px-3 py-2.5 text-sm font-medium transition-colors",
+              "-mb-px flex cursor-pointer items-center gap-2 border-b-2 px-3 py-2.5 text-sm font-medium transition-colors",
               tab === id
                 ? "border-primary text-primary"
                 : "border-transparent text-muted hover:text-ink",

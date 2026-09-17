@@ -1,9 +1,11 @@
-import { Share2, X } from "lucide-react";
+import toast from "react-hot-toast";
+import { Share2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router";
 import AsyncContent from "@/components/shared/AsyncContent";
 import EmptyState from "@/components/shared/EmptyState";
 import PageHeader from "@/components/shared/PageHeader";
+import ConnectionChoice from "@/components/social/ConnectionChoice";
 import PlatformCard from "@/components/social/PlatformCard";
 import SocialAccountCard from "@/components/social/SocialAccountCard";
 import Alert from "@/components/ui/Alert";
@@ -12,6 +14,8 @@ import { CONNECT_ERROR_MESSAGES, platformNameFromSlug } from "@/config/socialPla
 import { getErrorMessage } from "@/lib/forms";
 import { hasMinimumRole } from "@/lib/workspaceRoles";
 import {
+  useChooseConnectionTarget,
+  useConnectionChoices,
   useConnectSocialAccount,
   useSocialAccounts,
   useSocialPlatforms,
@@ -19,6 +23,7 @@ import {
 import useCurrentWorkspace from "@/services/workspace/useCurrentWorkspace";
 import useSwitchWorkspace from "@/services/workspace/useSwitchWorkspace";
 import type { ConnectablePlatform } from "@/types/socialAccount";
+import { notify } from "@/lib/toast";
 
 interface Notice {
   variant: "success" | "error";
@@ -45,22 +50,30 @@ function SocialAccounts() {
   const { current } = useCurrentWorkspace();
   const workspaceId = current?.workspace.id;
   const [searchParams, setSearchParams] = useSearchParams();
-  const [notice, setNotice] = useState(() => readRedirectNotice(searchParams));
+  // Set when the callback granted several accounts and the user has to choose.
+  const [draftId, setDraftId] = useState(() => searchParams.get("choose"));
   const switchWorkspace = useSwitchWorkspace();
   const platforms = useSocialPlatforms(workspaceId);
   const accounts = useSocialAccounts(workspaceId);
   const connect = useConnectSocialAccount();
+  const choices = useConnectionChoices(workspaceId, draftId);
+  const chooseTarget = useChooseConnectionTarget(workspaceId ?? "");
   const handledRedirect = useRef(false);
 
   // After the OAuth redirect: show the connected workspace and tidy the URL.
   useEffect(() => {
     if (handledRedirect.current) return;
     handledRedirect.current = true;
+    // The platform sent the user back here: report how the connection went.
+    const redirectNotice = readRedirectNotice(searchParams);
+    if (redirectNotice?.variant === "success")
+      notify.success(redirectNotice.message, "social-connect");
+    else if (redirectNotice) toast.error(redirectNotice.message, { id: "social-connect" });
     const connectedWorkspace = searchParams.get("workspaceId");
     if (connectedWorkspace && workspaceId && connectedWorkspace !== workspaceId) {
       switchWorkspace.mutate(connectedWorkspace);
     }
-    if (searchParams.has("connected") || searchParams.has("error")) {
+    if (searchParams.has("connected") || searchParams.has("error") || searchParams.has("choose")) {
       setSearchParams({}, { replace: true });
     }
   }, [searchParams, setSearchParams, switchWorkspace, workspaceId]);
@@ -77,8 +90,27 @@ function SocialAccounts() {
   const isConnecting = (platform: ConnectablePlatform) =>
     connect.isPending && connect.variables?.platform === platform;
   const startConnection = (platform: ConnectablePlatform) => {
-    setNotice(null);
-    connect.mutate({ platform, workspaceId });
+    connect.mutate(
+      { platform, workspaceId },
+      { onError: (error) => notify.error(error, undefined, "social-connect") },
+    );
+  };
+
+  const platformName = choices.data
+    ? (platformInfo(choices.data.platform)?.displayName ?? choices.data.platform)
+    : "";
+
+  const connectChosen = (targetId: string) => {
+    if (!draftId) return;
+    chooseTarget.mutate(
+      { draftId, workspaceId, targetId },
+      {
+        onSuccess: (account) => {
+          setDraftId(null);
+          notify.success(`${account.accountName} connected.`, "social-connect");
+        },
+      },
+    );
   };
 
   return (
@@ -88,22 +120,20 @@ function SocialAccounts() {
         description={`Connect the profiles ${current.workspace.name} publishes to. Access tokens are stored encrypted on FlowPost's servers and never sent to your browser.`}
       />
 
-      {notice && (
-        <Alert variant={notice.variant}>
-          <div className="flex items-start justify-between gap-3">
-            <span>{notice.message}</span>
-            <button
-              type="button"
-              onClick={() => setNotice(null)}
-              aria-label="Dismiss"
-              className="-m-1 inline-flex size-7 shrink-0 items-center justify-center rounded-md hover:bg-black/5"
-            >
-              <X className="size-4" aria-hidden="true" />
-            </button>
-          </div>
-        </Alert>
-      )}
-      {connect.isError && <Alert variant="error">{getErrorMessage(connect.error)}</Alert>}
+      {draftId &&
+        (choices.isError ? (
+          <Alert variant="error">{getErrorMessage(choices.error)}</Alert>
+        ) : (
+          <ConnectionChoice
+            platformName={platformName}
+            targets={choices.data?.targets ?? []}
+            isLoading={choices.isPending}
+            isSaving={chooseTarget.isPending}
+            error={chooseTarget.error}
+            onConnect={connectChosen}
+            onCancel={() => setDraftId(null)}
+          />
+        ))}
       {!canManage && (
         <Alert variant="info">
           Only admins and owners can connect, reconnect or disconnect accounts.

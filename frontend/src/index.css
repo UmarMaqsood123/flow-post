@@ -19,6 +19,28 @@
     -webkit-font-smoothing: antialiased;
   }
 
+  /*
+   * Tailwind v4 resets buttons to the default cursor. Everything clickable gets
+   * the pointer; disabled controls keep "not-allowed".
+   */
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  [role="option"],
+  [role="tab"],
+  a[href],
+  summary,
+  label:has(> input:not(:disabled)[type="checkbox"]),
+  label:has(> input:not(:disabled)[type="radio"]),
+  input[type="date"]:not(:disabled),
+  input[type="time"]:not(:disabled) {
+    cursor: pointer;
+  }
+
+  button:disabled,
+  [aria-disabled="true"] {
+    cursor: not-allowed;
+  }
+
   @media (prefers-reduced-motion: no-preference) {
     html {
       scroll-behavior: smooth;

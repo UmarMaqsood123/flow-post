@@ -34,6 +34,9 @@ export const createRateLimiter = ({ name, message, ...overrides }: LimiterOption
     legacyHeaders: false,
     identifier: name,
     ...createStore(name),
+    // If the Redis store is unreachable, general limits let traffic through so an
+    // outage doesn't take the API down; credential limits stay closed.
+    passOnStoreError: !name.startsWith("auth-"),
     handler: (_req, _res, next) => {
       next(AppError.tooManyRequests(message));
     },
@@ -70,14 +73,26 @@ export const authRateLimiters = {
     keyGenerator: ipKey,
     message: "Too many login attempts. Please try again later.",
   }),
-  /** Brute-force protection per account, independent of the attacker's IP. */
+  /**
+   * Failed logins per account from one address. Keyed on email and IP together,
+   * so someone else can't lock a user out just by typing their email wrong.
+   */
   loginByEmail: createRateLimiter({
     name: "auth-login-email",
     windowMs: 15 * MINUTE_MS,
     limit: 5,
-    keyGenerator: emailKey,
+    keyGenerator: (req) => `${emailKey(req)}|${ipKey(req)}`,
     skipSuccessfulRequests: true,
     message: "Too many failed login attempts. Please try again in 15 minutes.",
+  }),
+  /** Ceiling on failures per account from anywhere: slows distributed guessing. */
+  loginByAccount: createRateLimiter({
+    name: "auth-login-account",
+    windowMs: HOUR_MS,
+    limit: 50,
+    keyGenerator: emailKey,
+    skipSuccessfulRequests: true,
+    message: "Too many failed login attempts for this account. Please try again later.",
   }),
   refresh: createRateLimiter({
     name: "auth-refresh",
@@ -157,6 +172,23 @@ export const workspaceRateLimiters = {
   }),
 };
 
+/** Admin panel requests, per admin. Generous, but bounds a leaked session. */
+export const adminRateLimiter = createRateLimiter({
+  name: "admin",
+  windowMs: 15 * MINUTE_MS,
+  limit: 600,
+  keyGenerator: userKey,
+});
+
+/** Checkout, plan changes and portal links each call Stripe. */
+export const billingRateLimiter = createRateLimiter({
+  name: "billing-actions",
+  windowMs: HOUR_MS,
+  limit: 30,
+  keyGenerator: userKey,
+  message: "Too many billing requests. Please try again later.",
+});
+
 /** Each generation costs money, so limits apply per user and per workspace. */
 export const aiRateLimiters = {
   generateByUser: createRateLimiter({
@@ -204,5 +236,16 @@ export const socialRateLimiters = {
     limit: 50,
     keyGenerator: userKey,
     message: "Too many posts published recently. Please try again later.",
+  }),
+};
+
+/** Opening a live stream is cheap but long-lived; reconnect loops shouldn't pile up. */
+export const notificationRateLimiters = {
+  stream: createRateLimiter({
+    name: "notifications-stream",
+    windowMs: 5 * MINUTE_MS,
+    limit: 60,
+    keyGenerator: userKey,
+    message: "Too many live connections. Please try again shortly.",
   }),
 };

@@ -37,7 +37,7 @@ function Popover({
         aria-expanded={open}
         aria-controls={open ? panelId : undefined}
         onClick={() => setOpen((isOpen) => !isOpen)}
-        className={buttonClassName}
+        className={cn("cursor-pointer", buttonClassName)}
       >
         {buttonContent}
       </button>

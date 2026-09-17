@@ -14,7 +14,8 @@ const fetchSessionUser = async (): Promise<User | null> => {
     if (getAccessToken()) return await authApi.me();
     return (await refreshSession()).user;
   } catch (error) {
-    if (error instanceof ApiError && error.status === 401) {
+    // A suspended account is treated as signed out; the login page explains why.
+    if (error instanceof ApiError && (error.status === 401 || error.code === "ACCOUNT_SUSPENDED")) {
       clearAccessToken();
       return null;
     }

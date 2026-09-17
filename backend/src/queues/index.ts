@@ -1,10 +1,11 @@
 import { Queue, type QueueOptions } from "bullmq";
 import { logger } from "../config/logger";
 import { redis } from "../config/redis";
+import { PUBLISH_QUEUE_NAME } from "../constants/publishing.constant";
 
 /** Central registry of queue names. Add entries as features are built. */
 export const QueueName = {
-  // e.g. PUBLISH_POST: "publish-post",
+  PUBLISH_POST: PUBLISH_QUEUE_NAME,
 } as const;
 
 const defaultJobOptions: QueueOptions["defaultJobOptions"] = {

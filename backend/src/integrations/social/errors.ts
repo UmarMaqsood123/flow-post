@@ -28,6 +28,12 @@ interface SocialProviderErrorOptions {
   platform: SocialPlatformValue;
   retryable?: boolean;
   retryAfterSeconds?: number;
+  /**
+   * The request may have reached the platform without us seeing the answer (a
+   * timeout mid-request). Publishing again could post twice, so schedulers must
+   * stop and ask a person instead of retrying.
+   */
+  outcomeUnknown?: boolean;
   cause?: unknown;
 }
 
@@ -41,11 +47,12 @@ export class SocialProviderError extends Error {
   readonly platform: SocialPlatformValue;
   readonly retryable: boolean;
   readonly retryAfterSeconds?: number;
+  readonly outcomeUnknown: boolean;
 
   constructor(
     kind: SocialProviderErrorKindValue,
     message: string,
-    { platform, retryable, retryAfterSeconds, cause }: SocialProviderErrorOptions,
+    { platform, retryable, retryAfterSeconds, outcomeUnknown, cause }: SocialProviderErrorOptions,
   ) {
     super(message, { cause });
     this.name = "SocialProviderError";
@@ -53,5 +60,6 @@ export class SocialProviderError extends Error {
     this.platform = platform;
     this.retryable = retryable ?? (kind === "RATE_LIMITED" || kind === "PROVIDER_ERROR");
     this.retryAfterSeconds = retryAfterSeconds;
+    this.outcomeUnknown = outcomeUnknown ?? false;
   }
 }

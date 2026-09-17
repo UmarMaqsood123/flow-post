@@ -44,7 +44,7 @@ function ForgotPassword() {
           <button
             type="button"
             onClick={() => forgotPassword.reset()}
-            className="font-medium text-primary hover:underline"
+            className="cursor-pointer font-medium text-primary hover:underline"
           >
             try again
           </button>

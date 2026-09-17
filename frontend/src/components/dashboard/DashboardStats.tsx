@@ -1,4 +1,5 @@
 import { CalendarClock, FileText, Heart, Link2, Send } from "lucide-react";
+import { formatCompactNumber } from "@/lib/format";
 import { paths } from "@/routing/paths";
 import type { DashboardStats as Stats } from "@/types/dashboard";
 import StatCard from "./StatCard";
@@ -44,11 +45,11 @@ function DashboardStats({ stats, isLoading }: DashboardStatsProps) {
         to={paths.content}
       />
       <StatCard
-        label="Engagement rate"
+        label="Engagement"
         icon={Heart}
         isLoading={isLoading}
-        value={stats ? `${stats.engagementRate.value}%` : undefined}
-        change={stats?.engagementRate}
+        value={stats ? formatCompactNumber(stats.engagement.value) : undefined}
+        change={stats?.engagement}
         to={paths.analytics}
       />
     </div>

@@ -1,4 +1,4 @@
-import { CheckCircle2, Pencil, RefreshCw } from "lucide-react";
+import { CheckCircle2, Pencil, RefreshCw, Trash2 } from "lucide-react";
 import { type FormEvent, useState } from "react";
 import Alert from "@/components/ui/Alert";
 import Badge from "@/components/ui/Badge";
@@ -23,11 +23,14 @@ interface StrategyOverviewProps {
   versions: ContentStrategySummary[];
   onSelectVersion: (strategyId: string) => void;
   canActivate: boolean;
+  /** Editors can delete drafts; the active strategy and previous versions need an admin. */
+  canDelete: boolean;
   canRegenerate: boolean;
   canRename: boolean;
   isActivating: boolean;
   isGenerating: boolean;
   onActivate: () => void;
+  onDelete: () => void;
   onRegenerate: () => void;
   onRename: (name: string | null) => Promise<unknown>;
   /** When the brand profile last changed, to flag outdated strategies. */
@@ -90,11 +93,13 @@ function StrategyOverview({
   versions,
   onSelectVersion,
   canActivate,
+  canDelete,
   canRegenerate,
   canRename,
   isActivating,
   isGenerating,
   onActivate,
+  onDelete,
   onRegenerate,
   onRename,
   brandProfileUpdatedAt,
@@ -126,7 +131,7 @@ function StrategyOverview({
               <button
                 type="button"
                 onClick={() => setIsRenaming(true)}
-                className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs text-muted hover:bg-slate-100 hover:text-ink"
+                className="inline-flex cursor-pointer items-center gap-1 rounded-md px-1.5 py-0.5 text-xs text-muted hover:bg-slate-100 hover:text-ink"
               >
                 <Pencil className="size-3" aria-hidden="true" />
                 Rename
@@ -159,6 +164,12 @@ function StrategyOverview({
             <Button variant="secondary" onClick={onRegenerate} disabled={isGenerating}>
               <RefreshCw className="size-4" aria-hidden="true" />
               Regenerate
+            </Button>
+          )}
+          {canDelete && (
+            <Button variant="danger" onClick={onDelete} disabled={isGenerating || isActivating}>
+              <Trash2 className="size-4" aria-hidden="true" />
+              Delete
             </Button>
           )}
           {canActivate && strategy.status !== "ACTIVE" && (

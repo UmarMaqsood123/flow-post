@@ -1,4 +1,3 @@
-import { Bot, CalendarDays, ChartColumn, CreditCard, FileText } from "lucide-react";
 import { createBrowserRouter, Navigate } from "react-router";
 import AppLayout from "@/components/layouts/AppLayout";
 import AuthLayout from "@/components/layouts/AuthLayout";
@@ -11,7 +10,23 @@ import Login from "@/pages/auth/Login";
 import ResetPassword from "@/pages/auth/ResetPassword";
 import Signup from "@/pages/auth/Signup";
 import VerifyEmail from "@/pages/auth/VerifyEmail";
-import ComingSoon from "@/pages/ComingSoon";
+import AdminAIUsage from "@/pages/admin/AdminAIUsage";
+import AdminAuditLog from "@/pages/admin/AdminAuditLog";
+import AdminDashboard from "@/pages/admin/AdminDashboard";
+import AdminPlans from "@/pages/admin/AdminPlans";
+import AdminPublishingFailures from "@/pages/admin/AdminPublishingFailures";
+import AdminSocialConnections from "@/pages/admin/AdminSocialConnections";
+import AdminSubscriptionDetail from "@/pages/admin/AdminSubscriptionDetail";
+import AdminSubscriptions from "@/pages/admin/AdminSubscriptions";
+import AdminUserDetail from "@/pages/admin/AdminUserDetail";
+import AdminUsers from "@/pages/admin/AdminUsers";
+import AdminWorkspaceDetail from "@/pages/admin/AdminWorkspaceDetail";
+import AdminWorkspaces from "@/pages/admin/AdminWorkspaces";
+import Analytics from "@/pages/analytics/Analytics";
+import Billing from "@/pages/billing/Billing";
+import Autopilot from "@/pages/autopilot/Autopilot";
+import Calendar from "@/pages/calendar/Calendar";
+import Content from "@/pages/content/Content";
 import AICreate from "@/pages/create/AICreate";
 import Dashboard from "@/pages/dashboard/Dashboard";
 import Home from "@/pages/Home";
@@ -30,90 +45,11 @@ import GuestRoute from "./GuestRoute";
 import LegacyRedirect from "./LegacyRedirect";
 import { legacyRedirects, paths } from "./paths";
 import ProtectedRoute from "./ProtectedRoute";
+import RequireSuperAdmin from "./RequireSuperAdmin";
 import RequireWorkspace from "./RequireWorkspace";
 import type { RouteHandle } from "./routeHandle";
 
 const titled = (title: string): RouteHandle => ({ title });
-
-/** Sections that aren't built yet. */
-const placeholderRoutes = [
-  {
-    path: paths.content,
-    title: "Content",
-    element: (
-      <ComingSoon
-        title="Content"
-        description="Draft, review and manage every post in one place."
-        icon={FileText}
-        features={[
-          "Drafts, scheduled and published posts together",
-          "Approval workflow for editors and admins",
-          "Filter by platform, status and campaign",
-        ]}
-      />
-    ),
-  },
-  {
-    path: paths.calendar,
-    title: "Calendar",
-    element: (
-      <ComingSoon
-        title="Calendar"
-        description="Plan and schedule posts across every platform."
-        icon={CalendarDays}
-        features={[
-          "Week and month views in your workspace time zone",
-          "Drag and drop to reschedule",
-          "Best-time suggestions for each platform",
-        ]}
-      />
-    ),
-  },
-  {
-    path: paths.analytics,
-    title: "Analytics",
-    element: (
-      <ComingSoon
-        title="Analytics"
-        description="See how your content performs on each platform."
-        icon={ChartColumn}
-        features={[
-          "Reach, engagement and follower growth over time",
-          "Top-performing posts and formats",
-          "Exportable reports for clients and stakeholders",
-        ]}
-      />
-    ),
-  },
-  {
-    path: paths.autopilot,
-    title: "Autopilot",
-    element: (
-      <ComingSoon
-        title="Autopilot"
-        description="Keep your channels active with AI-planned posting."
-        icon={Bot}
-        features={[
-          "Plan a week of posts from your brand profile",
-          "Posting limits and quiet hours you control",
-          "Nothing goes live without approval unless you allow it",
-        ]}
-      />
-    ),
-  },
-  {
-    path: paths.billing,
-    title: "Billing",
-    element: (
-      <ComingSoon
-        title="Billing"
-        description="Manage your plan, seats and invoices."
-        icon={CreditCard}
-        features={["Plans and usage", "Invoices and payment methods", "Seat management"]}
-      />
-    ),
-  },
-];
 
 /**
  * Use `lazy` for large pages so they are code-split:
@@ -185,12 +121,69 @@ export const router = createBrowserRouter([
             element: <AppLayout />,
             children: [
               { path: paths.dashboard, element: <Dashboard />, handle: titled("Dashboard") },
-              ...placeholderRoutes.map(({ path, title, element }) => ({
-                path,
-                element,
-                handle: titled(title),
-              })),
               { path: paths.workspaces, element: <Workspaces />, handle: titled("Workspaces") },
+              { path: paths.billing, element: <Billing />, handle: titled("Billing") },
+              {
+                element: <RequireSuperAdmin />,
+                children: [
+                  { path: paths.admin, element: <AdminDashboard />, handle: titled("Admin") },
+                  {
+                    path: paths.adminUsers,
+                    element: <AdminUsers />,
+                    handle: titled("Admin · Users"),
+                  },
+                  {
+                    path: `${paths.adminUsers}/:userId`,
+                    element: <AdminUserDetail />,
+                    handle: titled("Admin · User"),
+                  },
+                  {
+                    path: paths.adminWorkspaces,
+                    element: <AdminWorkspaces />,
+                    handle: titled("Admin · Workspaces"),
+                  },
+                  {
+                    path: `${paths.adminWorkspaces}/:workspaceId`,
+                    element: <AdminWorkspaceDetail />,
+                    handle: titled("Admin · Workspace"),
+                  },
+                  {
+                    path: paths.adminSubscriptions,
+                    element: <AdminSubscriptions />,
+                    handle: titled("Admin · Subscriptions"),
+                  },
+                  {
+                    path: `${paths.adminSubscriptions}/:accountId`,
+                    element: <AdminSubscriptionDetail />,
+                    handle: titled("Admin · Subscription"),
+                  },
+                  {
+                    path: paths.adminPlans,
+                    element: <AdminPlans />,
+                    handle: titled("Admin · Plans"),
+                  },
+                  {
+                    path: paths.adminAIUsage,
+                    element: <AdminAIUsage />,
+                    handle: titled("Admin · AI usage"),
+                  },
+                  {
+                    path: paths.adminSocialConnections,
+                    element: <AdminSocialConnections />,
+                    handle: titled("Admin · Connections"),
+                  },
+                  {
+                    path: paths.adminPublishingFailures,
+                    element: <AdminPublishingFailures />,
+                    handle: titled("Admin · Publishing failures"),
+                  },
+                  {
+                    path: paths.adminAuditLog,
+                    element: <AdminAuditLog />,
+                    handle: titled("Admin · Audit log"),
+                  },
+                ],
+              },
               {
                 path: paths.createWorkspace,
                 element: <CreateWorkspace />,
@@ -205,6 +198,26 @@ export const router = createBrowserRouter([
                     path: paths.aiCreate,
                     element: <AICreate />,
                     handle: titled("AI Create"),
+                  },
+                  {
+                    path: paths.content,
+                    element: <Content />,
+                    handle: titled("Content"),
+                  },
+                  {
+                    path: paths.analytics,
+                    element: <Analytics />,
+                    handle: titled("Analytics"),
+                  },
+                  {
+                    path: paths.autopilot,
+                    element: <Autopilot />,
+                    handle: titled("Autopilot"),
+                  },
+                  {
+                    path: paths.calendar,
+                    element: <Calendar />,
+                    handle: titled("Calendar"),
                   },
                   {
                     path: paths.contentStrategy,

@@ -16,7 +16,9 @@ import { AppError } from "../utils/appError.util";
 import { detectFileType, sanitizeFileName } from "../utils/fileType.util";
 import { getStorage, isStorageEnabled, type PutObjectInput } from "../utils/storage.util";
 import type { WorkspaceContext } from "../utils/workspaceContext.util";
+import type { FileDetails } from "../validators/file.validator";
 import { hasMinimumRole } from "../utils/workspaceRoles.util";
+import * as EntitlementService from "./entitlement.service";
 
 const MB = 1024 * 1024;
 const HEADER_BYTES = 8192;
@@ -26,6 +28,8 @@ const MAX_LISTED_FILES = 200;
 interface PreparedUpload extends PutObjectInput {
   originalName: string;
   kind: FileKindValue;
+  title: string | null;
+  description: string | null;
 }
 
 const maxSizeMbFor = (kind: FileKindValue): number =>
@@ -77,10 +81,11 @@ const readHeader = async (filePath: string): Promise<Buffer> => {
 const prepareUploads = async (
   workspaceId: Types.ObjectId,
   files: Express.Multer.File[],
+  details: FileDetails[],
 ): Promise<PreparedUpload[]> => {
   const prepared: PreparedUpload[] = [];
 
-  for (const file of files) {
+  for (const [index, file] of files.entries()) {
     const originalName = sanitizeFileName(file.originalname);
     if (file.size === 0) {
       throw AppError.badRequest(`"${originalName}" is empty`, [
@@ -100,6 +105,8 @@ const prepareUploads = async (
       contentDisposition: contentDispositionFor(originalName, type.kind),
       originalName,
       kind: type.kind,
+      title: details[index]?.name ?? null,
+      description: details[index]?.description ?? null,
     });
   }
 
@@ -110,9 +117,17 @@ const removeTempFiles = async (files: Express.Multer.File[]) => {
   await Promise.allSettled(files.map((file) => rm(file.path, { force: true })));
 };
 
+/** Removes uploaded temp files that were rejected before reaching `uploadFiles`. */
+export const discardUploads = (files: Express.Multer.File[]) => removeTempFiles(files);
+
+/**
+ * Stores files with an optional name and description each. `details` lines up
+ * with `files` by index; a file with no entry just keeps its own file name.
+ */
 export const uploadFiles = async (
   { workspace, user }: WorkspaceContext,
   files: Express.Multer.File[] | undefined,
+  details: FileDetails[] = [],
 ): Promise<PublicFile[]> => {
   if (!files || files.length === 0) {
     throw AppError.badRequest("No file was uploaded", [
@@ -121,7 +136,16 @@ export const uploadFiles = async (
   }
 
   try {
-    const prepared = await prepareUploads(workspace._id, files);
+    if (details.length > files.length) {
+      throw AppError.badRequest("There are more names than files", [
+        { path: "metadata", message: "Send one entry per file, in the same order" },
+      ]);
+    }
+    await EntitlementService.assertStorageAvailable(
+      workspace,
+      files.reduce((total, file) => total + file.size, 0),
+    );
+    const prepared = await prepareUploads(workspace._id, files, details);
     const storage = getStorage();
     const storedKeys: string[] = [];
     let failure: unknown = null;
@@ -162,6 +186,8 @@ export const uploadFiles = async (
           key: item.key,
           url: storage.getPublicUrl(item.key),
           originalName: item.originalName,
+          title: item.title,
+          description: item.description,
           mimeType: item.contentType,
           size: item.size,
           kind: item.kind,

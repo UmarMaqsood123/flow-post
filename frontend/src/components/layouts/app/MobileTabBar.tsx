@@ -42,7 +42,7 @@ function MobileTabBar({ onOpenMenu, menuOpen }: MobileTabBarProps) {
             onClick={onOpenMenu}
             aria-expanded={menuOpen}
             aria-controls="mobile-navigation"
-            className={cn(tabClass, "text-muted hover:text-ink")}
+            className={cn(tabClass, "cursor-pointer text-muted hover:text-ink")}
           >
             <Menu className="size-5" aria-hidden="true" />
             More

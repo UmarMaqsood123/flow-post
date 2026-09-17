@@ -1,6 +1,7 @@
 import { Compass, Plus, X } from "lucide-react";
 import { useState } from "react";
 import { Link, useSearchParams } from "react-router";
+import { ConfirmModal, DeleteModal } from "@/components/modals";
 import ErrorState from "@/components/shared/ErrorState";
 import EmptyState from "@/components/shared/EmptyState";
 import PageHeader from "@/components/shared/PageHeader";
@@ -33,6 +34,7 @@ import { paths } from "@/routing/paths";
 import useBrandProfile from "@/services/brandProfile/useBrandProfile";
 import {
   useActivateContentStrategy,
+  useDeleteContentStrategy,
   useContentStrategies,
   useContentStrategy,
   useGenerateContentStrategy,
@@ -41,12 +43,7 @@ import {
 } from "@/services/contentStrategy/useContentStrategies";
 import useCurrentWorkspace from "@/services/workspace/useCurrentWorkspace";
 import type { StrategyContent, StrategySectionKey } from "@/types/contentStrategy";
-
-interface Notice {
-  variant: "success" | "error";
-  message: string;
-  warnings?: string[];
-}
+import { notify } from "@/lib/toast";
 
 function StrategySkeleton() {
   return (
@@ -64,7 +61,10 @@ function ContentStrategyPage() {
   const workspaceId = current?.workspace.id ?? "";
   const [searchParams, setSearchParams] = useSearchParams();
   const [panel, setPanel] = useState<"new" | "regenerate" | null>(null);
-  const [notice, setNotice] = useState<Notice | null>(null);
+  /** AI warnings about a generated version, kept on screen until dismissed. */
+  const [warnings, setWarnings] = useState<string[]>([]);
+  const [isActivateOpen, setIsActivateOpen] = useState(false);
+  const [isDeleteOpen, setIsDeleteOpen] = useState(false);
 
   const versions = useContentStrategies(workspaceId || undefined);
   const brandProfile = useBrandProfile(workspaceId || undefined);
@@ -81,6 +81,7 @@ function ContentStrategyPage() {
   const regenerate = useRegenerateContentStrategy(workspaceId);
   const update = useUpdateContentStrategy(workspaceId);
   const activate = useActivateContentStrategy(workspaceId);
+  const remove = useDeleteContentStrategy(workspaceId);
 
   // RequireWorkspace guarantees a current workspace; this narrows the type.
   if (!current) return null;
@@ -110,15 +111,14 @@ function ContentStrategyPage() {
   }) => {
     setPanel(null);
     selectVersion(created.id);
-    setNotice({
-      variant: "success",
-      message: `Version ${created.version} is ready. Review the sections, then activate it when you're happy with it.`,
-      warnings,
-    });
+    notify.success(
+      `Version ${created.version} is ready. Review the sections, then activate it when you're happy with it.`,
+    );
+    setWarnings(warnings);
   };
 
   const handleGenerate = (values: StrategyFormValues) => {
-    setNotice(null);
+    setWarnings([]);
     generate.mutate(
       {
         name: values.name.trim() || undefined,
@@ -132,7 +132,7 @@ function ContentStrategyPage() {
 
   const handleRegenerate = (values: StrategyFormValues) => {
     if (!strategy) return;
-    setNotice(null);
+    setWarnings([]);
     regenerate.mutate(
       {
         strategyId: strategy.id,
@@ -148,18 +148,42 @@ function ContentStrategyPage() {
   };
 
   const handleActivate = () => {
+    activate.reset();
+    setIsActivateOpen(true);
+  };
+
+  const confirmActivate = () => {
     if (!strategy) return;
-    const active = summaries.find((summary) => summary.status === "ACTIVE");
     const title = strategyTitle(strategy);
-    const message = active
-      ? `Make ${title} the active strategy? ${strategyTitle(active)} will move to previous versions.`
-      : `Make ${title} your workspace's active strategy?`;
-    if (!window.confirm(message)) return;
-    setNotice(null);
+    setWarnings([]);
     activate.mutate(strategy.id, {
-      onSuccess: () =>
-        setNotice({ variant: "success", message: `${title} is now the active strategy.` }),
-      onError: (error) => setNotice({ variant: "error", message: getErrorMessage(error) }),
+      onSuccess: () => {
+        setIsActivateOpen(false);
+        notify.success(`${title} is now the active strategy.`);
+      },
+    });
+  };
+
+  const activeStrategy = summaries.find((summary) => summary.status === "ACTIVE");
+
+  const confirmDelete = () => {
+    if (!strategy) return;
+    const title = strategyTitle(strategy);
+    setWarnings([]);
+    remove.mutate(strategy.id, {
+      onSuccess: () => {
+        setIsDeleteOpen(false);
+        setPanel(null);
+        // Drop the deleted version from the URL so the page falls back to another one.
+        setSearchParams(
+          (params) => {
+            params.delete("version");
+            return params;
+          },
+          { replace: true },
+        );
+        notify.success(`${title} was deleted.`);
+      },
     });
   };
 
@@ -182,14 +206,20 @@ function ContentStrategyPage() {
       value: strategy.content[key],
       canEdit: canEditSections,
       readOnlyReason,
+      // Errors (including edit conflicts) are shown inside the section itself.
       onSave: (value) =>
-        update.mutateAsync({
-          strategyId: strategy.id,
-          payload: {
-            revision: strategy.revision,
-            sections: { [key]: value } as Partial<StrategyContent>,
-          },
-        }),
+        update
+          .mutateAsync({
+            strategyId: strategy.id,
+            payload: {
+              revision: strategy.revision,
+              sections: { [key]: value } as Partial<StrategyContent>,
+            },
+          })
+          .then((saved) => {
+            notify.success("Section saved.", "strategy-section");
+            return saved;
+          }),
       onReload: () => void strategyQuery.refetch(),
     });
 
@@ -225,7 +255,40 @@ function ContentStrategyPage() {
   const hasStrategies = summaries.length > 0;
 
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
+    <div className="flex w-full flex-col gap-6">
+      {strategy && (
+        <DeleteModal
+          open={isDeleteOpen}
+          itemName={strategyTitle(strategy)}
+          description={
+            strategy.status === "ACTIVE"
+              ? "This is the active strategy. Until you activate another, AI Create writes from your brand profile alone. Posts keep their content pillars."
+              : strategy.status === "DRAFT"
+                ? "This draft and its edits will be removed."
+                : "This previous version will be removed from the history."
+          }
+          isDeleting={remove.isPending}
+          error={remove.error}
+          onConfirm={confirmDelete}
+          onClose={() => setIsDeleteOpen(false)}
+        />
+      )}
+      {strategy && (
+        <ConfirmModal
+          open={isActivateOpen}
+          title={`Make ${strategyTitle(strategy)} active?`}
+          message={
+            activeStrategy && activeStrategy.id !== strategy.id
+              ? `${strategyTitle(activeStrategy)} will move to previous versions. AI Create and the calendar use the active strategy from now on.`
+              : "AI Create and the calendar will use this strategy from now on."
+          }
+          confirmLabel="Make active"
+          isLoading={activate.isPending}
+          error={activate.error}
+          onConfirm={confirmActivate}
+          onClose={() => setIsActivateOpen(false)}
+        />
+      )}
       <PageHeader
         title="Content strategy"
         description={`What ${current.workspace.name} posts, where and why — generated from the brand profile and yours to edit.`}
@@ -255,24 +318,19 @@ function ContentStrategyPage() {
         </Alert>
       )}
 
-      {notice && (
-        <Alert variant={notice.variant}>
+      {warnings.length > 0 && (
+        <Alert variant="warning" title="Worth checking">
           <div className="flex items-start justify-between gap-3">
-            <div>
-              <p>{notice.message}</p>
-              {notice.warnings && notice.warnings.length > 0 && (
-                <ul className="mt-2 list-disc space-y-1 pl-5 text-xs">
-                  {notice.warnings.map((warning) => (
-                    <li key={warning}>{warning}</li>
-                  ))}
-                </ul>
-              )}
-            </div>
+            <ul className="list-disc space-y-1 pl-5 text-sm">
+              {warnings.map((warning) => (
+                <li key={warning}>{warning}</li>
+              ))}
+            </ul>
             <button
               type="button"
               aria-label="Dismiss"
-              onClick={() => setNotice(null)}
-              className="rounded-md p-1 opacity-70 hover:opacity-100"
+              onClick={() => setWarnings([])}
+              className="cursor-pointer rounded-md p-1 opacity-70 hover:opacity-100"
             >
               <X className="size-4" aria-hidden="true" />
             </button>
@@ -376,6 +434,11 @@ function ContentStrategyPage() {
                   selectVersion(strategyId);
                 }}
                 canActivate={isAdmin}
+                canDelete={strategy.status === "DRAFT" ? canGenerate : isAdmin}
+                onDelete={() => {
+                  remove.reset();
+                  setIsDeleteOpen(true);
+                }}
                 canRegenerate={canGenerate}
                 canRename={
                   strategy.status === "DRAFT"

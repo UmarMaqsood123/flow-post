@@ -1,6 +1,7 @@
 import { type Processor, Worker, type WorkerOptions } from "bullmq";
 import { logger } from "../config/logger";
 import { createRedisConnection } from "../config/redis";
+import { createPublishWorker } from "./publish.worker";
 
 const workers: Worker[] = [];
 
@@ -42,10 +43,11 @@ export const createWorker = <DataType = unknown, ResultType = unknown>(
 
 /** Register all queue processors here as features are built. */
 export const registerWorkers = (): void => {
-  // e.g. createWorker(QueueName.PUBLISH_POST, publishPostProcessor);
+  createPublishWorker();
 };
 
 export const getWorkerCount = (): number => workers.length;
+export const getWorkers = (): readonly Worker[] => workers;
 
 export const closeWorkers = async (): Promise<void> => {
   await Promise.all(workers.map((worker) => worker.close()));

@@ -2,10 +2,13 @@ import type { Types } from "mongoose";
 import { logger } from "../config/logger";
 import { WorkspaceRole, type WorkspaceRoleValue } from "../constants/workspace.constant";
 import { User, type UserDocument } from "../models/user.model";
+import type { WorkspaceDocument } from "../models/workspace.model";
 import { WorkspaceMember } from "../models/workspaceMember.model";
 import { AppError } from "../utils/appError.util";
 import type { WorkspaceContext } from "../utils/workspaceContext.util";
 import { canAssignRole, canManageMember, hasMinimumRole } from "../utils/workspaceRoles.util";
+import * as EntitlementService from "./entitlement.service";
+import * as NotificationEvents from "./notificationEvents.service";
 
 export interface PublicWorkspaceMember {
   id: string;
@@ -102,13 +105,36 @@ export const changeMemberRole = async (
       throw lastOwnerError(false);
     }
 
+    if (previousRole === WorkspaceRole.OWNER) await reassignBillingOwner(workspace, target.user);
+
     logger.info(
       { workspaceId: workspace.id, actorId: user.id, memberId, from: previousRole, to: role },
       "Workspace member role changed",
     );
+    if (!isSelf) await NotificationEvents.memberRoleChanged(target.user, workspace, role);
   }
 
   return loadPublicMember(workspace._id, target._id);
+};
+
+/**
+ * When the person paying for a workspace stops being an owner, billing moves to
+ * the longest-standing remaining owner, and that owner's plan applies from now on.
+ */
+const reassignBillingOwner = async (workspace: WorkspaceDocument, formerOwner: Types.ObjectId) => {
+  if (!EntitlementService.billingOwnerOf(workspace).equals(formerOwner)) return;
+  const next = await WorkspaceMember.findOne({
+    workspace: workspace._id,
+    role: WorkspaceRole.OWNER,
+    user: { $ne: formerOwner },
+  }).sort({ createdAt: 1 });
+  if (!next) return;
+  workspace.billingOwner = next.user;
+  await workspace.save();
+  logger.info(
+    { workspaceId: workspace.id, from: formerOwner.toString(), to: next.user.toString() },
+    "Workspace billing owner changed",
+  );
 };
 
 /** Removes a member, or lets a member leave when they remove themselves. */
@@ -132,6 +158,19 @@ export const removeMember = async (
   }
 
   await WorkspaceMember.deleteOne({ _id: target._id, workspace: workspace._id });
+
+  // Two owners removing each other at the same moment could both pass the check
+  // above and leave the workspace with none. Put this one back if that happened.
+  if (target.role === WorkspaceRole.OWNER && (await countOwners(workspace._id)) === 0) {
+    await WorkspaceMember.create({
+      workspace: target.workspace,
+      user: target.user,
+      role: target.role,
+      invitedBy: target.invitedBy ?? null,
+    });
+    throw lastOwnerError(isSelf);
+  }
+  if (target.role === WorkspaceRole.OWNER) await reassignBillingOwner(workspace, target.user);
   await User.updateOne(
     { _id: target.user, activeWorkspace: workspace._id },
     { $set: { activeWorkspace: null } },
@@ -141,4 +180,5 @@ export const removeMember = async (
     { workspaceId: workspace.id, actorId: user.id, memberId, left: isSelf },
     "Workspace member removed",
   );
+  if (!isSelf) await NotificationEvents.memberRemoved(target.user, workspace);
 };

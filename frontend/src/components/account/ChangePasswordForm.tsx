@@ -7,11 +7,11 @@ import TextField from "@/components/ui/TextField";
 import { applyServerFieldErrors, getErrorMessage } from "@/lib/forms";
 import { changePasswordSchema, PASSWORD_HINT } from "@/schemas/auth.schema";
 import useChangePassword from "@/services/auth/useChangePassword";
+import { notify } from "@/lib/toast";
 
 function ChangePasswordForm() {
   const changePassword = useChangePassword();
   const [formError, setFormError] = useState<string | null>(null);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const {
     register,
     handleSubmit,
@@ -25,11 +25,10 @@ function ChangePasswordForm() {
 
   const onSubmit = handleSubmit(async ({ currentPassword, newPassword }) => {
     setFormError(null);
-    setSuccessMessage(null);
     try {
       await changePassword.mutateAsync({ currentPassword, newPassword });
       reset();
-      setSuccessMessage("Password changed. You've been signed out of all other devices.");
+      notify.success("Password changed. You've been signed out of all other devices.");
     } catch (error) {
       if (!applyServerFieldErrors(error, setError, ["currentPassword", "newPassword"])) {
         setFormError(getErrorMessage(error));
@@ -39,7 +38,6 @@ function ChangePasswordForm() {
 
   return (
     <form onSubmit={onSubmit} noValidate className="flex max-w-md flex-col gap-4">
-      {successMessage && <Alert variant="success">{successMessage}</Alert>}
       {formError && <Alert variant="error">{formError}</Alert>}
 
       <TextField

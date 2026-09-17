@@ -1,11 +1,14 @@
-import { Trash2, WandSparkles, X } from "lucide-react";
+import { CalendarClock, ExternalLink, Trash2, WandSparkles, X } from "lucide-react";
 import { useCallback, useState } from "react";
-import { useSearchParams } from "react-router";
+import { Link, useSearchParams } from "react-router";
 import BriefForm from "@/components/create/BriefForm";
 import PostEditor from "@/components/create/PostEditor";
 import PostListPane from "@/components/create/PostListPane";
+import PostMediaSection from "@/components/create/PostMediaSection";
 import PostPreview from "@/components/create/PostPreview";
 import RefineToolbar from "@/components/create/RefineToolbar";
+import { DeleteModal } from "@/components/modals";
+import SchedulePicker from "@/components/schedule/SchedulePicker";
 import VersionHistory from "@/components/create/VersionHistory";
 import EmptyState from "@/components/shared/EmptyState";
 import ErrorState from "@/components/shared/ErrorState";
@@ -16,9 +19,16 @@ import Button from "@/components/ui/Button";
 import Dropdown from "@/components/ui/Dropdown";
 import Skeleton from "@/components/ui/Skeleton";
 import Spinner from "@/components/ui/Spinner";
-import { platformLabel, POST_STATUS_DETAILS } from "@/config/post";
+import {
+  isPostLocked,
+  MANUAL_POST_STATUSES,
+  platformLabel,
+  POST_STATUS_DETAILS,
+} from "@/config/post";
 import { getErrorMessage } from "@/lib/forms";
+import { dayKey, formatDayKey, timeKey } from "@/lib/timezone";
 import { hasMinimumRole } from "@/lib/workspaceRoles";
+import { paths } from "@/routing/paths";
 import {
   useDeletePost,
   useGeneratePosts,
@@ -27,20 +37,22 @@ import {
   useRefinePost,
   useRegeneratePost,
   useRestorePostVersion,
+  useSchedulePost,
   useSetPostStatus,
   useUpdatePost,
 } from "@/services/posts/usePosts";
+import { useSocialAccounts } from "@/services/socialAccounts/useSocialAccounts";
 import useCurrentWorkspace from "@/services/workspace/useCurrentWorkspace";
 import type { BrandTone } from "@/types/brandProfile";
-import type { GeneratePostsPayload, PostStatus, RefineAction } from "@/types/post";
+import type {
+  GeneratePostsPayload,
+  ManualPostStatus,
+  RefineAction,
+  SchedulePostInput,
+} from "@/types/post";
+import { notify } from "@/lib/toast";
 
-interface Notice {
-  variant: "success" | "error";
-  message: string;
-  warnings?: string[];
-}
-
-const STATUS_OPTIONS = (["DRAFT", "READY", "ARCHIVED"] as PostStatus[]).map((status) => ({
+const STATUS_OPTIONS = MANUAL_POST_STATUSES.map((status) => ({
   name: POST_STATUS_DETAILS[status].label,
   value: status,
 }));
@@ -50,15 +62,18 @@ function AICreatePage() {
   const workspaceId = current?.workspace.id ?? "";
   const [searchParams, setSearchParams] = useSearchParams();
   const [isBriefOpen, setIsBriefOpen] = useState(false);
-  const [notice, setNotice] = useState<Notice | null>(null);
+  /** AI warnings to act on (length limits, buzzwords), kept on screen until dismissed. */
+  const [warnings, setWarnings] = useState<string[]>([]);
   const [hasUnsavedEdits, setHasUnsavedEdits] = useState(false);
   const [pendingAction, setPendingAction] = useState<RefineAction | "REGENERATE" | null>(null);
   const [restoringId, setRestoringId] = useState<string | null>(null);
+  const [isDeleteOpen, setIsDeleteOpen] = useState(false);
 
   const list = usePosts(workspaceId || undefined, { limit: 50 });
   const posts = list.data?.data ?? [];
   const requestedId = searchParams.get("post");
-  const selectedId = posts.find((post) => post.id === requestedId)?.id ?? posts[0]?.id;
+  // A post opened from Content may be older than the recent list, so it's loaded directly.
+  const selectedId = requestedId ?? posts[0]?.id;
   const detail = usePost(workspaceId || undefined, selectedId);
 
   const generate = useGeneratePosts(workspaceId);
@@ -68,6 +83,8 @@ function AICreatePage() {
   const restore = useRestorePostVersion(workspaceId);
   const setStatus = useSetPostStatus(workspaceId);
   const remove = useDeletePost(workspaceId);
+  const schedulePost = useSchedulePost(workspaceId);
+  const socialAccounts = useSocialAccounts(workspaceId || undefined);
 
   const onDirtyChange = useCallback((dirty: boolean) => setHasUnsavedEdits(dirty), []);
 
@@ -78,7 +95,7 @@ function AICreatePage() {
   const post = detail.data?.post;
   const versions = detail.data?.versions ?? [];
   const version = post?.currentVersion ?? null;
-  const isArchived = post?.status === "ARCHIVED";
+  const isLocked = post ? isPostLocked(post.status) : false;
 
   const selectPost = (postId: string) => {
     setHasUnsavedEdits(false);
@@ -92,16 +109,15 @@ function AICreatePage() {
   };
 
   const handleGenerate = (payload: GeneratePostsPayload) => {
-    setNotice(null);
+    setWarnings([]);
     generate.mutate(payload, {
       onSuccess: ({ posts: created, warnings }) => {
         setIsBriefOpen(false);
         if (created[0]) selectPost(created[0].id);
-        setNotice({
-          variant: "success",
-          message: `${created.length} ${created.length === 1 ? "post" : "posts"} written. Edit anything, or use the buttons to refine.`,
-          warnings,
-        });
+        notify.success(
+          `${created.length} ${created.length === 1 ? "post" : "posts"} written. Edit anything, or use the buttons to refine.`,
+        );
+        setWarnings(warnings);
       },
     });
   };
@@ -111,15 +127,14 @@ function AICreatePage() {
     run: () => Promise<{ warnings: string[] }>,
   ) => {
     if (!post) return;
-    setNotice(null);
+    setWarnings([]);
     setPendingAction(action);
     run()
       .then(({ warnings }) => {
-        if (warnings.length > 0) {
-          setNotice({ variant: "success", message: "Updated.", warnings });
-        }
+        notify.success("Updated.", "ai-create-action");
+        setWarnings(warnings);
       })
-      .catch((error: unknown) => setNotice({ variant: "error", message: getErrorMessage(error) }))
+      .catch((error: unknown) => notify.error(error, undefined, "ai-create-action"))
       .finally(() => setPendingAction(null));
   };
 
@@ -135,21 +150,24 @@ function AICreatePage() {
 
   const handleRestore = (versionId: string) => {
     if (!post) return;
-    setNotice(null);
+    setWarnings([]);
     setRestoringId(versionId);
     restore
       .mutateAsync({ postId: post.id, versionId })
-      .catch((error: unknown) => setNotice({ variant: "error", message: getErrorMessage(error) }))
+      .catch((error: unknown) => notify.error(error, undefined, "ai-create-action"))
       .finally(() => setRestoringId(null));
   };
 
   const handleDelete = () => {
+    remove.reset();
+    setIsDeleteOpen(true);
+  };
+
+  const confirmDelete = () => {
     if (!post) return;
-    if (!window.confirm(`Delete this ${platformLabel(post.platform)} post and its versions?`)) {
-      return;
-    }
     remove.mutate(post.id, {
       onSuccess: () => {
+        setIsDeleteOpen(false);
         setSearchParams(
           (params) => {
             params.delete("post");
@@ -157,10 +175,38 @@ function AICreatePage() {
           },
           { replace: true },
         );
-        setNotice({ variant: "success", message: "Post deleted." });
+        notify.success("Post deleted.");
       },
-      onError: (error) => setNotice({ variant: "error", message: getErrorMessage(error) }),
     });
+  };
+
+  const timeZone = current.workspace.timezone ?? "UTC";
+  // Only connected accounts on this post's platform can publish it.
+  const accountsForPost = (socialAccounts.data ?? []).filter(
+    (account) => account.platform === post?.platform && account.status === "CONNECTED",
+  );
+
+  const handleSchedule = (input: SchedulePostInput) => {
+    if (!post) return;
+    setWarnings([]);
+    schedulePost
+      .mutateAsync({ postId: post.id, ...input })
+      .then((updated) =>
+        notify.success(
+          `Scheduled for ${formatDayKey(dayKey(new Date(updated.scheduledAt ?? ""), timeZone), { weekday: "short", day: "numeric", month: "short" })} at ${timeKey(new Date(updated.scheduledAt ?? ""), timeZone)}. It publishes automatically.`,
+          "ai-create-action",
+        ),
+      )
+      .catch((error: unknown) => notify.error(error, undefined, "ai-create-action"));
+  };
+
+  const handleUnschedule = () => {
+    if (!post) return;
+    setWarnings([]);
+    schedulePost
+      .mutateAsync({ postId: post.id, scheduledAt: null })
+      .then(() => notify.success("Unscheduled.", "ai-create-action"))
+      .catch((error: unknown) => notify.error(error, undefined, "ai-create-action"));
   };
 
   const isGenerating = generate.isPending;
@@ -182,24 +228,29 @@ function AICreatePage() {
         }
       />
 
-      {notice && (
-        <Alert variant={notice.variant}>
+      <DeleteModal
+        open={isDeleteOpen && Boolean(post)}
+        itemName={post ? `this ${platformLabel(post.platform)} post` : "this post"}
+        description={post && `"${post.brief.topic}" and all its versions will be removed.`}
+        isDeleting={remove.isPending}
+        error={remove.error}
+        onConfirm={confirmDelete}
+        onClose={() => setIsDeleteOpen(false)}
+      />
+
+      {warnings.length > 0 && (
+        <Alert variant="warning" title="Check before publishing">
           <div className="flex items-start justify-between gap-3">
-            <div>
-              <p>{notice.message}</p>
-              {notice.warnings && notice.warnings.length > 0 && (
-                <ul className="mt-2 list-disc space-y-1 pl-5 text-xs">
-                  {notice.warnings.map((warning) => (
-                    <li key={warning}>{warning}</li>
-                  ))}
-                </ul>
-              )}
-            </div>
+            <ul className="list-disc space-y-1 pl-5 text-sm">
+              {warnings.map((warning) => (
+                <li key={warning}>{warning}</li>
+              ))}
+            </ul>
             <button
               type="button"
               aria-label="Dismiss"
-              onClick={() => setNotice(null)}
-              className="rounded-md p-1 opacity-70 hover:opacity-100"
+              onClick={() => setWarnings([])}
+              className="cursor-pointer rounded-md p-1 opacity-70 hover:opacity-100"
             >
               <X className="size-4" aria-hidden="true" />
             </button>
@@ -220,7 +271,7 @@ function AICreatePage() {
         <section className="rounded-xl border border-line bg-surface p-5 sm:p-6">
           <h2 className="font-semibold">What should FlowPost write about?</h2>
           <p className="mt-1 text-sm text-muted">
-            Your brand profile and active strategy shape the result.
+            Your brand profile, active strategy and approved performance insights shape the result.
           </p>
           <div className="mt-5">
             <BriefForm
@@ -294,7 +345,10 @@ function AICreatePage() {
                           STATUS_OPTIONS.find((option) => option.value === post.status) ?? null
                         }
                         onChange={(option) =>
-                          setStatus.mutate({ postId: post.id, status: option.value as PostStatus })
+                          setStatus.mutate({
+                            postId: post.id,
+                            status: option.value as ManualPostStatus,
+                          })
                         }
                         disabled={setStatus.isPending}
                       />
@@ -315,8 +369,8 @@ function AICreatePage() {
               {canWrite && (
                 <RefineToolbar
                   disabledReason={
-                    isArchived
-                      ? "Archived posts can't be changed. Set the status back to Draft first."
+                    isLocked
+                      ? "Published posts can't be changed. Duplicate it from the calendar to work on a new version."
                       : hasUnsavedEdits
                         ? "Save or reset your edits first — an AI change would replace them."
                         : null
@@ -333,7 +387,7 @@ function AICreatePage() {
                   platform={post.platform}
                   content={version.content}
                   versionId={version.id}
-                  canEdit={canWrite && !isArchived}
+                  canEdit={canWrite && !isLocked}
                   onDirtyChange={onDirtyChange}
                   onSave={(content) =>
                     update.mutateAsync({
@@ -343,15 +397,71 @@ function AICreatePage() {
                   }
                 />
                 <div className="flex min-w-0 flex-col gap-4">
+                  <PostMediaSection
+                    key={`media-${post.id}`}
+                    workspaceId={workspaceId}
+                    platform={post.platform}
+                    media={version.media}
+                    videoFormat={version.videoFormat}
+                    mediaIssue={version.mediaIssue}
+                    canEdit={canWrite}
+                    canUpload={canWrite}
+                    disabledReason={
+                      isLocked
+                        ? "Published posts can't be changed."
+                        : hasUnsavedEdits
+                          ? "Save or reset your edits before changing media."
+                          : null
+                    }
+                    isSaving={update.isPending}
+                    error={update.error}
+                    onChange={(media, videoFormat) =>
+                      update.mutateAsync({
+                        postId: post.id,
+                        payload: {
+                          baseVersion: post.versionCount,
+                          content: version.content,
+                          media,
+                          videoFormat,
+                        },
+                      })
+                    }
+                  />
                   <PostPreview
                     platform={post.platform}
                     content={version.content}
+                    media={version.media}
                     workspaceName={current.workspace.name}
                   />
+                  <section className="rounded-xl border border-line bg-surface p-4 sm:p-5">
+                    <h3 className="flex items-center gap-2 font-semibold">
+                      <CalendarClock className="size-4 text-muted" aria-hidden="true" />
+                      Schedule
+                    </h3>
+                    <SchedulePicker
+                      key={post.id}
+                      post={post}
+                      blockedReason={version.mediaIssue}
+                      timeZone={timeZone}
+                      accounts={accountsForPost}
+                      editable={canWrite && !isLocked}
+                      busy={schedulePost.isPending}
+                      onSchedule={handleSchedule}
+                      onUnschedule={handleUnschedule}
+                      headless
+                    />
+                    <Link
+                      to={`${paths.calendar}?post=${post.id}`}
+                      className="mt-3 inline-flex items-center gap-1.5 text-sm font-medium text-primary underline underline-offset-2"
+                    >
+                      <ExternalLink className="size-4" aria-hidden="true" />
+                      Open in calendar
+                    </Link>
+                  </section>
                   <VersionHistory
                     versions={versions}
                     currentVersionId={version.id}
-                    canRestore={canWrite && !isArchived}
+                    canRestore={canWrite && !isLocked}
                     onRestore={handleRestore}
                     restoringId={restoringId}
                   />

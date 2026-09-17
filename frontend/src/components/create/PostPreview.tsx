@@ -1,7 +1,7 @@
 import { Play } from "lucide-react";
 import { PLATFORM_TEXT_LABELS, platformLabel, usesField } from "@/config/post";
 import { cn } from "@/lib/utils";
-import type { CreatePlatform, PostContent } from "@/types/post";
+import type { CreatePlatform, PostAttachment, PostContent } from "@/types/post";
 
 const initials = (name: string) =>
   name
@@ -33,35 +33,60 @@ function Body({ text }: { text: string }) {
   );
 }
 
-function Script({ content }: { content: PostContent }) {
-  if (content.script.length === 0) return null;
-  return (
-    <ol className="divide-y divide-line rounded-lg border border-line">
-      {content.script.map((scene, index) => (
-        <li key={`${index}-${scene.scene}`} className="flex gap-3 p-3">
-          <span className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full bg-slate-100 text-xs font-medium text-muted">
-            {index + 1}
-          </span>
-          <div className="min-w-0 text-sm">
-            {scene.scene && <p className="font-medium">{scene.scene}</p>}
-            {scene.voiceover && <p className="mt-0.5 text-muted">“{scene.voiceover}”</p>}
-          </div>
-        </li>
-      ))}
-    </ol>
-  );
-}
-
 interface PostPreviewProps {
   platform: CreatePlatform;
   content: PostContent;
+  /** Attached media; the preview shows it in place of the placeholders. */
+  media?: PostAttachment[];
   workspaceName: string;
   className?: string;
 }
 
+/** Attached media as it would sit in the post: one video, or images in order. */
+function MediaPreview({ media, vertical }: { media: PostAttachment[]; vertical: boolean }) {
+  const [first] = media;
+  if (!first) return null;
+  if (first.kind === "video") {
+    return (
+      <video
+        src={first.url}
+        controls
+        preload="metadata"
+        playsInline
+        className={cn(
+          "w-full rounded-lg bg-slate-900 object-contain",
+          vertical ? "aspect-[9/16] max-h-96" : "aspect-video",
+        )}
+      />
+    );
+  }
+  return (
+    <div className="relative">
+      <img
+        src={first.url}
+        alt={first.description ?? ""}
+        referrerPolicy="no-referrer"
+        className="aspect-square w-full rounded-lg object-cover"
+      />
+      {media.length > 1 && (
+        <span className="absolute top-2 right-2 rounded-full bg-black/60 px-2 py-0.5 text-xs font-medium text-white">
+          1/{media.length}
+        </span>
+      )}
+    </div>
+  );
+}
+
 /** A light impression of the post on its platform — not a pixel-exact mock-up. */
-function PostPreview({ platform, content, workspaceName, className }: PostPreviewProps) {
+function PostPreview({
+  platform,
+  content,
+  media = [],
+  workspaceName,
+  className,
+}: PostPreviewProps) {
   const isVideo = platform === "TIKTOK" || platform === "YOUTUBE";
+  const hasMedia = media.length > 0;
   const showsHashtagsSeparately =
     content.hashtags.length > 0 && !content.hashtags.every((tag) => content.text.includes(tag));
 
@@ -74,9 +99,16 @@ function PostPreview({ platform, content, workspaceName, className }: PostPrevie
           <h3 className="text-base leading-snug font-semibold">{content.title}</h3>
         )}
 
+        {hasMedia && (
+          <MediaPreview
+            media={media}
+            vertical={platform === "TIKTOK" || platform === "INSTAGRAM"}
+          />
+        )}
+
         {isVideo && (
           <>
-            {content.hook && (
+            {!hasMedia && content.hook && (
               <div className="relative flex aspect-[9/16] max-h-80 items-center justify-center overflow-hidden rounded-lg bg-slate-900 p-6 text-center">
                 <p className="text-sm font-semibold text-balance text-white">{content.hook}</p>
                 <Play
@@ -85,15 +117,12 @@ function PostPreview({ platform, content, workspaceName, className }: PostPrevie
                 />
               </div>
             )}
-            <Script content={content} />
           </>
         )}
 
-        {platform === "INSTAGRAM" && (
+        {platform === "INSTAGRAM" && !hasMedia && (
           <div className="flex aspect-square max-h-72 items-center justify-center rounded-lg border border-dashed border-line bg-slate-50 p-5 text-center">
-            <p className="text-xs text-muted">
-              {content.visualIdea ? content.visualIdea.split("\n")[0] : "Your image or carousel"}
-            </p>
+            <p className="text-xs text-muted">Attach an image, carousel or reel</p>
           </div>
         )}
 

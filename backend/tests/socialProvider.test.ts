@@ -7,7 +7,11 @@ import {
 import { SocialProviderError } from "../src/integrations/social/errors";
 import { BaseSocialProvider } from "../src/integrations/social/provider";
 import { createDefaultSocialProviders } from "../src/integrations/social/providers";
+import { FacebookProvider } from "../src/integrations/social/providers/facebook.provider";
+import { InstagramProvider } from "../src/integrations/social/providers/instagram.provider";
 import { LinkedInProvider } from "../src/integrations/social/providers/linkedin.provider";
+import { TikTokProvider } from "../src/integrations/social/providers/tiktok.provider";
+import { YouTubeProvider } from "../src/integrations/social/providers/youtube.provider";
 import {
   findUnimplementedCapabilities,
   SocialProviderRegistry,
@@ -122,7 +126,7 @@ describe("BaseSocialProvider", () => {
 describe("Default providers", () => {
   const registry = new SocialProviderRegistry(createDefaultSocialProviders());
 
-  it("registers every platform; LinkedIn is real but needs app credentials", () => {
+  it("registers every platform, none configured in tests", () => {
     expect(registry.list().map((provider) => provider.platform)).toEqual([
       "LINKEDIN",
       "FACEBOOK",
@@ -131,7 +135,11 @@ describe("Default providers", () => {
       "YOUTUBE",
     ]);
     expect(registry.get("LINKEDIN")).toBeInstanceOf(LinkedInProvider);
-    // Tests run without LINKEDIN_* credentials.
+    expect(registry.get("FACEBOOK")).toBeInstanceOf(FacebookProvider);
+    expect(registry.get("INSTAGRAM")).toBeInstanceOf(InstagramProvider);
+    expect(registry.get("TIKTOK")).toBeInstanceOf(TikTokProvider);
+    expect(registry.get("YOUTUBE")).toBeInstanceOf(YouTubeProvider);
+    // vitest.config.mts blanks every platform credential.
     expect(registry.list().every((provider) => !provider.isAvailable())).toBe(true);
   });
 
@@ -140,6 +148,7 @@ describe("Default providers", () => {
       registry.list().map((provider) => [provider.platform, [...provider.capabilities].sort()]),
     );
     expect(matrix).toEqual({
+      // LinkedIn analytics need the partner-only Community Management API.
       LINKEDIN: ["IMAGE_POST", "TEXT_POST", "TOKEN_REFRESH"],
       FACEBOOK: [
         "ANALYTICS",
@@ -151,35 +160,33 @@ describe("Default providers", () => {
         "TEXT_POST",
         "VIDEO_POST",
       ],
+      // Instagram has no text-only post and can't delete published media.
       INSTAGRAM: ["ANALYTICS", "CAROUSEL", "IMAGE_POST", "READ_POST", "SHORT_VIDEO", "VIDEO_POST"],
-      TIKTOK: ["CAROUSEL", "IMAGE_POST", "SHORT_VIDEO", "TOKEN_REFRESH", "VIDEO_POST"],
-      YOUTUBE: [
-        "ANALYTICS",
-        "DELETE_POST",
-        "READ_POST",
-        "SHORT_VIDEO",
-        "TOKEN_REFRESH",
-        "VIDEO_POST",
-      ],
+      // TikTok photo posts need a verified media domain, so they aren't built.
+      TIKTOK: ["ANALYTICS", "SHORT_VIDEO", "TOKEN_REFRESH", "VIDEO_POST"],
+      // Deleting needs a broader Google scope than uploading asks for.
+      YOUTUBE: ["ANALYTICS", "READ_POST", "SHORT_VIDEO", "TOKEN_REFRESH", "VIDEO_POST"],
     });
-    expect(registry.get("TIKTOK").oauth.usesPkce).toBe(true);
+    // Both use a confidential server-side flow, so neither needs PKCE.
+    expect(registry.get("TIKTOK").oauth.usesPkce).toBe(false);
+    expect(registry.get("YOUTUBE").oauth.usesPkce).toBe(false);
   });
 
-  it("fails planned platforms with NOT_IMPLEMENTED and unconfigured LinkedIn with NOT_CONFIGURED", async () => {
-    for (const provider of registry.list().filter((item) => item.platform !== "LINKEDIN")) {
-      const notImplemented = { kind: "NOT_IMPLEMENTED", platform: provider.platform };
+  it("says a provider isn't configured rather than pretending to work", async () => {
+    for (const provider of registry.list()) {
       await expect(
         provider.getAuthorizationUrl({ state: "state", redirectUri: "https://app.test/callback" }),
-      ).rejects.toMatchObject(notImplemented);
-      await expect(provider.publishText(credentials, { text: "Hi" })).rejects.toMatchObject(
-        notImplemented,
-      );
+      ).rejects.toMatchObject({ kind: "NOT_CONFIGURED", platform: provider.platform });
     }
-    await expect(
-      registry
-        .get("LINKEDIN")
-        .getAuthorizationUrl({ state: "state", redirectUri: "https://app.test/callback" }),
-    ).rejects.toMatchObject({ kind: "NOT_CONFIGURED", platform: "LINKEDIN" });
+  });
+
+  it("rejects publishing a kind of content the platform doesn't have", async () => {
+    // Every video-only platform refuses text rather than inventing a post.
+    for (const platform of ["INSTAGRAM", "TIKTOK", "YOUTUBE"] as const) {
+      await expect(
+        registry.get(platform).publishText(credentials, { text: "Hi" }),
+      ).rejects.toMatchObject({ kind: "UNSUPPORTED_CAPABILITY", platform });
+    }
   });
 });
 

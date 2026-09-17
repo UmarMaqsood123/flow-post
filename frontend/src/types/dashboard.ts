@@ -1,9 +1,7 @@
-import type { SocialPlatform } from "./brandProfile";
+import type { AnalyticsMetric } from "./analytics";
+import type { ConnectablePlatform } from "./socialAccount";
 
-/**
- * Dashboard data. Served by a mock (services/dashboard/dashboardApi.ts) until
- * analytics and social integrations exist; the shape is what the API will return.
- */
+/** Mirrors the dashboard summary in backend/src/services/analytics.service.ts. */
 
 export interface MetricWithChange {
   value: number;
@@ -16,30 +14,37 @@ export interface DashboardStats {
   postsThisMonth: MetricWithChange;
   scheduledPosts: number;
   publishedPosts: MetricWithChange;
-  /** Percentage, e.g. 4.2. */
-  engagementRate: MetricWithChange;
+  /** Total engagement over the last 30 days, against the 30 before it. */
+  engagement: MetricWithChange;
 }
 
 export interface DailyEngagement {
   /** YYYY-MM-DD */
   date: string;
-  engagements: number;
+  engagement: number;
 }
 
 export interface EngagementSummary {
-  totals: { impressions: number; likes: number; comments: number; shares: number };
+  /** Only the metrics the connected platforms actually report. */
+  totals: Partial<Record<AnalyticsMetric, number>>;
   daily: DailyEngagement[];
 }
 
-export interface DashboardPost {
+export interface UpcomingPost {
   id: string;
-  platform: SocialPlatform;
-  caption: string;
-  status: "scheduled" | "published";
-  /** Scheduled time for upcoming posts, publish time for recent ones (ISO). */
-  date: string;
-  mediaType: "image" | "video" | "text";
-  metrics: { likes: number; comments: number; shares: number } | null;
+  platform: ConnectablePlatform;
+  topic: string;
+  scheduledAt: string;
+}
+
+export interface RecentPost {
+  id: string;
+  platform: ConnectablePlatform;
+  topic: string;
+  publishedAt: string | null;
+  url: string | null;
+  /** Null when metrics haven't been collected for this post yet. */
+  engagement: number | null;
 }
 
 export type RecommendationKind = "profile" | "connect" | "best_time" | "content_idea" | "hashtags";
@@ -54,14 +59,12 @@ export interface AiRecommendation {
 }
 
 export interface DashboardSummary {
-  /** True while the numbers are generated sample data. */
-  isSample: boolean;
   stats: DashboardStats;
   engagement: EngagementSummary;
-  upcomingPosts: DashboardPost[];
-  recentPosts: DashboardPost[];
-  recommendations: AiRecommendation[];
+  upcomingPosts: UpcomingPost[];
+  recentPosts: RecentPost[];
+  /** Metrics the connected platforms report, so widgets can hide the rest. */
+  availableMetrics: AnalyticsMetric[];
+  /** True when no metrics have been collected yet. */
+  awaitingMetrics: boolean;
 }
-
-/** Development-only `?preview=` override for checking dashboard states. */
-export type DashboardPreview = "loading" | "empty" | "error";

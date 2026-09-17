@@ -7,6 +7,7 @@ import {
 } from "../../src/integrations/social/errors";
 import { BaseSocialProvider, type SocialOperations } from "../../src/integrations/social/provider";
 import type {
+  ConnectionTarget,
   AnalyticsQuery,
   AnalyticsResult,
   AuthorizationRequest,
@@ -120,6 +121,39 @@ export class MockSocialProvider extends BaseSocialProvider {
     this.pendingCodes.set(code, url.searchParams.get("code_challenge"));
     return { code, state: url.searchParams.get("state") ?? "" };
   }
+
+  /**
+   * Turns this into a platform where one login covers several accounts, the way
+   * Facebook Pages do. The optional methods only exist once this is called, so
+   * providers without targets keep the single-account flow.
+   */
+  offerTargets(targets: ConnectionTarget[]) {
+    this.targets = targets;
+    this.listConnectionTargets = () => Promise.resolve(this.targets);
+    this.connectTarget = (tokens: OAuthTokenSet, targetId: string) => {
+      const target = this.targets.find((candidate) => candidate.id === targetId);
+      if (!target) {
+        return Promise.reject(this.error("INVALID_REQUEST", "That account is gone"));
+      }
+      this.connectedTargetIds.push(targetId);
+      return Promise.resolve({
+        tokens,
+        profile: {
+          providerAccountId: target.id,
+          accountName: target.name,
+          username: target.username ?? null,
+          profileImage: target.image ?? null,
+          metadata: { accountType: "page" },
+        },
+      });
+    };
+  }
+
+  private targets: ConnectionTarget[] = [];
+  /** Targets that were actually connected, in order. */
+  readonly connectedTargetIds: string[] = [];
+  listConnectionTargets?: (tokens: OAuthTokenSet) => Promise<ConnectionTarget[]>;
+  connectTarget?: (tokens: OAuthTokenSet, targetId: string) => Promise<OAuthConnection>;
 
   /** Invalidates all access tokens, as if they expired or were revoked on the platform. */
   revokeAccessTokens() {
@@ -269,7 +303,10 @@ export class MockSocialProvider extends BaseSocialProvider {
   ): Promise<AnalyticsResult> {
     this.begin("getAnalytics", credentials);
     return {
-      metrics: { impressions: 1200, likes: 48, comments: 6, shares: 3 },
+      metrics: query.providerPostId
+        ? { views: 1200, likes: 48, comments: 6, shares: 3 }
+        : { followers: 900 },
+      raw: { mock: true },
       periodStart: query.since ?? null,
       periodEnd: query.until ?? null,
       fetchedAt: new Date(),

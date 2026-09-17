@@ -21,6 +21,7 @@ import type {
 } from "../validators/contentStrategy.validator";
 import * as AIService from "./ai.service";
 import * as BrandProfileService from "./brandProfile.service";
+import * as PerformanceInsightsService from "./performanceInsights.service";
 
 const POPULATE_USERS = ["createdBy", "editedBy", "activatedBy"].map((path) => ({
   path,
@@ -118,12 +119,16 @@ const createVersion = async (
     basedOnVersion,
   }: { name: string | null; inputs: IStrategyInputs; basedOnVersion: number | null },
 ): Promise<GeneratedStrategy> => {
-  const brandProfile = await BrandProfileService.getBrandProfile(context);
+  const [brandProfile, insights] = await Promise.all([
+    BrandProfileService.getBrandProfile(context),
+    PerformanceInsightsService.getApprovedInsightsContext(context),
+  ]);
   const result = await AIService.generateContentStrategy(context, {
     timeframe: inputs.timeframe,
     platforms: inputs.platforms.length > 0 ? inputs.platforms : undefined,
     focus: inputs.focus ?? undefined,
     instructions: inputs.instructions ?? undefined,
+    insights,
   });
 
   const generation = {
@@ -306,6 +311,40 @@ const restorePrevious = async (workspaceId: Types.ObjectId, ids: Types.ObjectId[
     // Someone activated another strategy in the meantime; that one stays active.
     if (!isDuplicateKey(error)) throw error;
   }
+};
+
+/**
+ * Deletes one strategy version. Editors can delete drafts, the same drafts they
+ * generate and edit. The active strategy and previous versions are admin-only:
+ * one drives what AI writes, the other is the record of what used to.
+ *
+ * Deleting the active strategy leaves the workspace without one, the same state
+ * as a new workspace; AI Create then writes from the brand profile alone. Posts
+ * keep their content pillars, which are stored as text on each post.
+ */
+export const deleteStrategy = async (context: WorkspaceContext, strategyId: string) => {
+  const strategy = await findStrategy(context, strategyId);
+  if (
+    strategy.status !== ContentStrategyStatus.DRAFT &&
+    !hasMinimumRole(context.member.role, WorkspaceRole.ADMIN)
+  ) {
+    throw AppError.forbidden(
+      strategy.status === ContentStrategyStatus.ACTIVE
+        ? "Only admins and owners can delete the active strategy"
+        : "Only admins and owners can delete previous versions",
+    );
+  }
+
+  await ContentStrategy.deleteOne({ _id: strategy._id, workspace: context.workspace._id });
+  logger.info(
+    {
+      workspaceId: context.workspace.id,
+      userId: context.user.id,
+      version: strategy.version,
+      status: strategy.status,
+    },
+    "Content strategy deleted",
+  );
 };
 
 export const deleteWorkspaceStrategies = async (workspaceId: Types.ObjectId): Promise<void> => {

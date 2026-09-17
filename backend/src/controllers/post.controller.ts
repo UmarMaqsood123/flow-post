@@ -1,15 +1,21 @@
 import type { Request, Response } from "express";
+import { PostStatus } from "../constants/post.constant";
 import * as PostService from "../services/post.service";
+import * as PublishingService from "../services/publishing.service";
 import { sendCreated, sendPaginated, sendSuccess } from "../utils/apiResponse.util";
 import { getWorkspaceContext } from "../utils/workspaceContext.util";
 import type {
+  CalendarQuery,
+  CreatePostInput,
   GeneratePostsInput,
   ListPostsQuery,
   PostParams,
   PostVersionParams,
   RefinePostInput,
   RegeneratePostInput,
+  SchedulePostInput,
   UpdatePostContentInput,
+  UpdatePostDetailsInput,
   UpdatePostStatusInput,
 } from "../validators/post.validator";
 
@@ -77,6 +83,58 @@ export const UpdatePostStatus = async (req: Request, res: Response) => {
     req.body as UpdatePostStatusInput,
   );
   sendSuccess(res, { message: "Status updated", data: { post } });
+};
+
+export const CreatePost = async (req: Request, res: Response) => {
+  const post = await PostService.createPost(getWorkspaceContext(req), req.body as CreatePostInput);
+  sendCreated(res, { post }, "Post created");
+};
+
+export const DuplicatePost = async (req: Request, res: Response) => {
+  const { postId } = req.params as PostParams;
+  const post = await PostService.duplicatePost(getWorkspaceContext(req), postId);
+  sendCreated(res, { post }, "Post duplicated");
+};
+
+export const SchedulePost = async (req: Request, res: Response) => {
+  const { postId } = req.params as PostParams;
+  const post = await PostService.schedulePost(
+    getWorkspaceContext(req),
+    postId,
+    req.body as SchedulePostInput,
+  );
+  // A date alone doesn't queue anything, so say which of the two happened.
+  const message = !post.scheduledAt
+    ? "Post unscheduled"
+    : post.status === PostStatus.SCHEDULED
+      ? "Post scheduled"
+      : "Moved on the calendar. It won't publish until you schedule it.";
+  sendSuccess(res, { message, data: { post } });
+};
+
+export const UpdatePostDetails = async (req: Request, res: Response) => {
+  const { postId } = req.params as PostParams;
+  const post = await PostService.updatePostDetails(
+    getWorkspaceContext(req),
+    postId,
+    req.body as UpdatePostDetailsInput,
+  );
+  sendSuccess(res, { message: "Post updated", data: { post } });
+};
+
+/** The publishing schedule for a post, with its job and attempt history. */
+export const GetPostSchedule = async (req: Request, res: Response) => {
+  const { postId } = req.params as PostParams;
+  const data = await PublishingService.getScheduleForPost(getWorkspaceContext(req), postId);
+  sendSuccess(res, { message: "Schedule", data });
+};
+
+export const GetCalendar = async (req: Request, res: Response) => {
+  const data = await PostService.getCalendar(
+    getWorkspaceContext(req),
+    req.query as unknown as CalendarQuery,
+  );
+  sendSuccess(res, { message: "Calendar", data });
 };
 
 export const DeletePost = async (req: Request, res: Response) => {

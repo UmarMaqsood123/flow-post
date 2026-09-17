@@ -1,11 +1,20 @@
 import mongoose, { type HydratedDocument, type Model, Schema, type Types } from "mongoose";
-import { UserRole, type UserRoleValue } from "../constants/auth.constant";
+import {
+  UserRole,
+  type UserRoleValue,
+  UserStatus,
+  type UserStatusValue,
+} from "../constants/auth.constant";
 
 export interface IUser {
   name: string;
   email: string;
   passwordHash: string;
   role: UserRoleValue;
+  status: UserStatusValue;
+  suspendedAt: Date | null;
+  suspendedBy: Types.ObjectId | null;
+  suspensionReason: string | null;
   emailVerified: boolean;
   emailVerifiedAt: Date | null;
   emailVerificationTokenHash: string | null;
@@ -16,6 +25,8 @@ export interface IUser {
   /** Incremented to invalidate every outstanding access token for this user. */
   tokenVersion: number;
   lastLoginAt: Date | null;
+  /** Last authenticated request, updated at most every few minutes. */
+  lastActiveAt: Date | null;
   /** Last workspace the user switched to. A preference only — access is always re-checked. */
   activeWorkspace: Types.ObjectId | null;
   createdAt: Date;
@@ -48,6 +59,10 @@ const UserSchema = new Schema<IUser>(
     },
     passwordHash: { type: String, required: true, select: false },
     role: { type: String, enum: Object.values(UserRole), default: UserRole.USER },
+    status: { type: String, enum: Object.values(UserStatus), default: UserStatus.ACTIVE },
+    suspendedAt: { type: Date, default: null },
+    suspendedBy: { type: Schema.Types.ObjectId, ref: "User", default: null },
+    suspensionReason: { type: String, default: null, maxlength: 500 },
     emailVerified: { type: Boolean, default: false },
     emailVerifiedAt: { type: Date, default: null },
     emailVerificationTokenHash: { type: String, default: null, select: false },
@@ -57,6 +72,7 @@ const UserSchema = new Schema<IUser>(
     passwordChangedAt: { type: Date, default: null },
     tokenVersion: { type: Number, default: 0 },
     lastLoginAt: { type: Date, default: null },
+    lastActiveAt: { type: Date, default: null },
     activeWorkspace: { type: Schema.Types.ObjectId, ref: "Workspace", default: null },
   },
   {
@@ -81,6 +97,14 @@ UserSchema.index(
   { passwordResetTokenHash: 1 },
   { partialFilterExpression: { passwordResetTokenHash: { $type: "string" } } },
 );
+
+// Admin lists: newest first, filtered by status or role, and active-user counts.
+UserSchema.index({ createdAt: -1 });
+UserSchema.index({ status: 1, createdAt: -1 });
+UserSchema.index({ role: 1 });
+UserSchema.index({ lastActiveAt: -1 });
+// Clearing the active workspace when one is archived or deleted.
+UserSchema.index({ activeWorkspace: 1 }, { sparse: true });
 
 export const User: Model<IUser> = mongoose.model<IUser>("User", UserSchema);
 

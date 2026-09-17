@@ -29,6 +29,15 @@ export const socialAccountIdParamsSchema = z.object({
   accountId: objectIdField,
 });
 
+export const connectionDraftParamsSchema = z.object({
+  draftId: objectIdField,
+});
+
+/** Which of the accounts a pending authorization covers the user wants to connect. */
+export const chooseConnectionTargetSchema = z.object({
+  targetId: z.string().trim().min(1, "Choose an account").max(256),
+});
+
 /** Platform-specific limits (e.g. LinkedIn's 3,000 characters) are enforced by the provider. */
 export const publishSocialPostSchema = z
   .object({
@@ -45,3 +54,5 @@ export type ConnectSocialAccountQuery = z.infer<typeof connectSocialAccountQuery
 export type OAuthCallbackQuery = z.infer<typeof oauthCallbackQuerySchema>;
 export type SocialAccountIdParams = z.infer<typeof socialAccountIdParamsSchema>;
 export type PublishSocialPostInput = z.infer<typeof publishSocialPostSchema>;
+export type ConnectionDraftParams = z.infer<typeof connectionDraftParamsSchema>;
+export type ChooseConnectionTargetInput = z.infer<typeof chooseConnectionTargetSchema>;

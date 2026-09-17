@@ -30,7 +30,13 @@ export const SocialCapability = {
  * The provider method behind each capability. The registry uses it to reject
  * providers that declare a capability without implementing the method.
  */
-export const CAPABILITY_METHODS: Record<SocialCapability, keyof SocialOperations> = {
+/** Only the always-present operations; the optional connection-target methods aren't capabilities. */
+export type CapabilityMethod = Exclude<
+  keyof SocialOperations,
+  "listConnectionTargets" | "connectTarget"
+>;
+
+export const CAPABILITY_METHODS: Record<SocialCapability, CapabilityMethod> = {
   TEXT_POST: "publishText",
   IMAGE_POST: "publishImage",
   CAROUSEL: "publishImage",

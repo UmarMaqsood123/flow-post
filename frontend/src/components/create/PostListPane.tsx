@@ -27,7 +27,7 @@ function PostListPane({ posts, selectedId, onSelect }: PostListPaneProps) {
                 onClick={() => onSelect(post.id)}
                 aria-current={isSelected ? "true" : undefined}
                 className={cn(
-                  "w-full border-b border-line px-4 py-3 text-left transition-colors last:border-b-0",
+                  "w-full cursor-pointer border-b border-line px-4 py-3 text-left transition-colors last:border-b-0",
                   isSelected ? "bg-primary/5" : "hover:bg-slate-50",
                 )}
               >

@@ -5,13 +5,17 @@ import { aiRateLimiters } from "../middlewares/rateLimiter.middleware";
 import { validate } from "../middlewares/validate.middleware";
 import { requireWorkspaceRole } from "../middlewares/workspace.middleware";
 import {
+  calendarQuerySchema,
+  createPostSchema,
   generatePostsSchema,
   listPostsQuerySchema,
   postParamsSchema as params,
   postVersionParamsSchema,
   refinePostSchema,
   regeneratePostSchema,
+  schedulePostSchema,
   updatePostContentSchema,
+  updatePostDetailsSchema,
   updatePostStatusSchema,
 } from "../validators/post.validator";
 
@@ -25,6 +29,9 @@ const editor = requireWorkspaceRole(WorkspaceRole.EDITOR);
 const aiWrite = [editor, aiRateLimiters.generateByUser, aiRateLimiters.generateByWorkspace];
 
 PostRouter.get("/", validate({ query: listPostsQuerySchema }), PostController.ListPosts);
+PostRouter.post("/", editor, validate({ body: createPostSchema }), PostController.CreatePost);
+// Before /:postId so "calendar" isn't read as an id.
+PostRouter.get("/calendar", validate({ query: calendarQuerySchema }), PostController.GetCalendar);
 PostRouter.post(
   "/generate",
   ...aiWrite,
@@ -32,6 +39,7 @@ PostRouter.post(
   PostController.GeneratePosts,
 );
 PostRouter.get("/:postId", validate({ params }), PostController.GetPost);
+PostRouter.get("/:postId/schedule", validate({ params }), PostController.GetPostSchedule);
 PostRouter.patch(
   "/:postId",
   editor,
@@ -50,6 +58,19 @@ PostRouter.post(
   ...aiWrite,
   validate({ params, body: refinePostSchema }),
   PostController.RefinePost,
+);
+PostRouter.post("/:postId/duplicate", editor, validate({ params }), PostController.DuplicatePost);
+PostRouter.patch(
+  "/:postId/schedule",
+  editor,
+  validate({ params, body: schedulePostSchema }),
+  PostController.SchedulePost,
+);
+PostRouter.patch(
+  "/:postId/details",
+  editor,
+  validate({ params, body: updatePostDetailsSchema }),
+  PostController.UpdatePostDetails,
 );
 PostRouter.patch(
   "/:postId/status",

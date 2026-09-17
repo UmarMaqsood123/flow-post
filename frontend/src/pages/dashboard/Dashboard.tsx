@@ -1,11 +1,10 @@
 import { CalendarClock, CalendarPlus, Layers, Plus, Send, WandSparkles } from "lucide-react";
-import { Link, useSearchParams } from "react-router";
+import { Link } from "react-router";
 import AiRecommendationsWidget from "@/components/dashboard/AiRecommendationsWidget";
 import DashboardStats from "@/components/dashboard/DashboardStats";
 import EngagementWidget from "@/components/dashboard/EngagementWidget";
 import GettingStarted, { type ChecklistStep } from "@/components/dashboard/GettingStarted";
 import PostsWidget from "@/components/dashboard/PostsWidget";
-import SampleDataNotice from "@/components/dashboard/SampleDataNotice";
 import EmptyState from "@/components/shared/EmptyState";
 import ErrorState from "@/components/shared/ErrorState";
 import PageHeader from "@/components/shared/PageHeader";
@@ -15,18 +14,19 @@ import { buttonStyles } from "@/components/ui/buttonStyles";
 import { getOnboardingProgress } from "@/lib/brandProfile";
 import { getGreeting } from "@/lib/format";
 import { getErrorMessage } from "@/lib/forms";
+import { buildRecommendations } from "@/lib/recommendations";
 import { hasMinimumRole } from "@/lib/workspaceRoles";
 import { paths } from "@/routing/paths";
 import useResendVerification from "@/services/auth/useResendVerification";
 import useSession from "@/services/auth/useSession";
 import useBrandProfile from "@/services/brandProfile/useBrandProfile";
-import { toDashboardPreview } from "@/services/dashboard/dashboardApi";
-import useDashboardSummary from "@/services/dashboard/useDashboardSummary";
+import { useDashboardSummary } from "@/services/dashboard/useDashboardSummary";
 import { useSocialAccounts } from "@/services/socialAccounts/useSocialAccounts";
 import useCurrentWorkspace from "@/services/workspace/useCurrentWorkspace";
 import useWorkspaceInvitations from "@/services/workspace/useWorkspaceInvitations";
 import useWorkspaceMembers from "@/services/workspace/useWorkspaceMembers";
-import type { DashboardSummary } from "@/types/dashboard";
+import type { AiRecommendation, DashboardSummary } from "@/types/dashboard";
+import { notify } from "@/lib/toast";
 
 const smallButton = (variant: "primary" | "secondary") => buttonStyles(variant, "px-3 py-1.5");
 
@@ -36,8 +36,8 @@ interface AnalyticsProps {
   timeZone?: string;
   /** Resets per-workspace widget state such as dismissed recommendations. */
   workspaceKey: string;
-  /** Real count of connected accounts; replaces the sample number once loaded. */
   connectedAccounts?: number;
+  recommendations?: AiRecommendation[];
 }
 
 function DashboardAnalytics({
@@ -46,6 +46,7 @@ function DashboardAnalytics({
   timeZone,
   workspaceKey,
   connectedAccounts,
+  recommendations,
 }: AnalyticsProps) {
   const stats =
     summary && connectedAccounts !== undefined
@@ -53,19 +54,18 @@ function DashboardAnalytics({
       : summary?.stats;
   return (
     <>
-      {summary?.isSample && <SampleDataNotice />}
       <DashboardStats stats={stats} isLoading={isLoading} />
       {/* items-start: each card keeps its own height instead of stretching to the tallest. */}
       <div className="grid items-start gap-6 lg:grid-cols-3">
         <EngagementWidget
           className="lg:col-span-2"
           engagement={summary?.engagement}
-          rate={summary?.stats.engagementRate}
+          availableMetrics={summary?.availableMetrics}
           isLoading={isLoading}
         />
         <AiRecommendationsWidget
           key={workspaceKey}
-          recommendations={summary?.recommendations}
+          recommendations={recommendations}
           isLoading={isLoading}
         />
       </div>
@@ -110,9 +110,6 @@ function DashboardAnalytics({
 
 function Dashboard() {
   const { data: user } = useSession();
-  const [searchParams] = useSearchParams();
-  // Development only: ?preview=loading|empty|error shows each dashboard state.
-  const preview = import.meta.env.DEV ? toDashboardPreview(searchParams.get("preview")) : undefined;
   const resendVerification = useResendVerification();
   const workspaces = useCurrentWorkspace();
   const { current } = workspaces;
@@ -122,13 +119,7 @@ function Dashboard() {
   const invitations = useWorkspaceInvitations(workspace?.id, isAdmin);
   const brandProfile = useBrandProfile(workspace?.id);
   const socialAccounts = useSocialAccounts(workspace?.id);
-  const summary = useDashboardSummary({
-    workspace,
-    brandProfile: brandProfile.data,
-    ready: !brandProfile.isPending,
-    canEditBrandProfile: isAdmin,
-    preview,
-  });
+  const summary = useDashboardSummary(workspace?.id);
 
   // ProtectedRoute guarantees a user; this narrows the type.
   if (!user) return null;
@@ -146,7 +137,12 @@ function Dashboard() {
         <Button
           variant="secondary"
           className="px-3 py-1.5"
-          onClick={() => resendVerification.mutate()}
+          onClick={() =>
+            resendVerification.mutate(undefined, {
+              onSuccess: () => notify.success(`Verification email sent to ${user.email}.`),
+              onError: (error) => notify.error(error),
+            })
+          }
           isLoading={resendVerification.isPending}
           disabled={resendVerification.isSuccess}
         >
@@ -254,6 +250,11 @@ function Dashboard() {
             timeZone={workspace.timezone}
             workspaceKey={workspace.id}
             connectedAccounts={socialAccounts.data?.length}
+            recommendations={buildRecommendations({
+              brandProfile: brandProfile.data,
+              canEditBrandProfile: isAdmin,
+              connectedAccounts: socialAccounts.data?.length ?? 0,
+            })}
           />
         )}
       </>
@@ -294,11 +295,6 @@ function Dashboard() {
         <Alert variant="warning" title="Verify your email address">
           We sent a verification link to <span className="font-medium">{user.email}</span>. You can
           resend it from the checklist below.
-          {resendVerification.isError && (
-            <span className="mt-1 block text-red-800">
-              {getErrorMessage(resendVerification.error)}
-            </span>
-          )}
         </Alert>
       )}
 

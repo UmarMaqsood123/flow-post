@@ -10,15 +10,17 @@ import {
   useMarkNotificationsRead,
   useNotifications,
 } from "@/services/notifications/useNotifications";
+import { useNotificationStream } from "@/services/notifications/useNotificationStream";
 import useCurrentWorkspace from "@/services/workspace/useCurrentWorkspace";
 
 function NotificationsMenu() {
   const { current } = useCurrentWorkspace();
-  const workspaceId = current?.workspace.id;
-  const notifications = useNotifications(workspaceId);
+  const workspaceId = current?.workspace.id ?? null;
+  const live = useNotificationStream(workspaceId);
+  const notifications = useNotifications(workspaceId, { live });
   const markRead = useMarkNotificationsRead(workspaceId);
-  const items = notifications.data ?? [];
-  const unread = items.filter((item) => !item.read).length;
+  const items = notifications.data?.notifications ?? [];
+  const unread = notifications.data?.unread ?? 0;
 
   return (
     <Popover
@@ -46,79 +48,70 @@ function NotificationsMenu() {
             {unread > 0 && (
               <button
                 type="button"
-                onClick={markRead.markAll}
-                className="text-xs font-medium text-primary hover:underline"
+                onClick={() => markRead.mutate(undefined)}
+                className="cursor-pointer text-xs font-medium text-primary hover:underline"
               >
                 Mark all as read
               </button>
             )}
           </div>
           <div className="max-h-96 overflow-y-auto">
-            {!workspaceId ? (
-              <EmptyState
-                compact
-                icon={BellOff}
-                title="No notifications"
-                description="Create a workspace to get updates about posts and your team."
-              />
-            ) : (
-              <AsyncContent
-                isLoading={notifications.isPending}
-                error={notifications.error}
-                errorTitle="We couldn't load notifications"
-                onRetry={() => void notifications.refetch()}
-                isRetrying={notifications.isRefetching}
-                isEmpty={items.length === 0}
-                loading={
-                  <div className="flex flex-col gap-3 p-4">
-                    {[0, 1, 2].map((item) => (
-                      <Skeleton key={item} className="h-12" />
-                    ))}
-                  </div>
-                }
-                empty={
-                  <EmptyState
-                    compact
-                    icon={BellOff}
-                    title="You're all caught up"
-                    description="We'll let you know when posts publish or teammates need you."
-                  />
-                }
-              >
-                <ul className="divide-y divide-line">
-                  {items.map((item) => (
-                    <li key={item.id}>
-                      <Link
-                        to={item.href}
-                        onClick={() => {
-                          markRead.markOne(item.id);
-                          close();
-                        }}
-                        className="flex gap-3 px-4 py-3 hover:bg-slate-50"
-                      >
-                        <span
-                          aria-hidden="true"
-                          className={cn(
-                            "mt-1.5 size-2 shrink-0 rounded-full",
-                            item.read ? "bg-transparent" : "bg-primary",
-                          )}
-                        />
-                        <span className="min-w-0 flex-1">
-                          <span className={cn("block text-sm", !item.read && "font-semibold")}>
-                            {item.title}
-                            {!item.read && <span className="sr-only"> (unread)</span>}
-                          </span>
-                          <span className="mt-0.5 block text-xs text-muted">{item.body}</span>
-                          <span className="mt-1 block text-xs text-muted">
-                            {formatRelativeTime(item.createdAt)}
-                          </span>
-                        </span>
-                      </Link>
-                    </li>
+            <AsyncContent
+              isLoading={notifications.isPending}
+              error={notifications.error}
+              errorTitle="We couldn't load notifications"
+              onRetry={() => void notifications.refetch()}
+              isRetrying={notifications.isRefetching}
+              isEmpty={items.length === 0}
+              loading={
+                <div className="flex flex-col gap-3 p-4">
+                  {[0, 1, 2].map((item) => (
+                    <Skeleton key={item} className="h-12" />
                   ))}
-                </ul>
-              </AsyncContent>
-            )}
+                </div>
+              }
+              empty={
+                <EmptyState
+                  compact
+                  icon={BellOff}
+                  title="You're all caught up"
+                  description="We'll let you know when posts publish or teammates need you."
+                />
+              }
+            >
+              <ul className="divide-y divide-line">
+                {items.map((item) => (
+                  <li key={item.id}>
+                    <Link
+                      to={item.href}
+                      onClick={() => {
+                        if (!item.read) markRead.mutate([item.id]);
+                        close();
+                      }}
+                      className="flex gap-3 px-4 py-3 hover:bg-slate-50"
+                    >
+                      <span
+                        aria-hidden="true"
+                        className={cn(
+                          "mt-1.5 size-2 shrink-0 rounded-full",
+                          item.read ? "bg-transparent" : "bg-primary",
+                        )}
+                      />
+                      <span className="min-w-0 flex-1">
+                        <span className={cn("block text-sm", !item.read && "font-semibold")}>
+                          {item.title}
+                          {!item.read && <span className="sr-only"> (unread)</span>}
+                        </span>
+                        <span className="mt-0.5 block text-xs text-muted">{item.body}</span>
+                        <span className="mt-1 block text-xs text-muted">
+                          {formatRelativeTime(item.createdAt)}
+                        </span>
+                      </span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </AsyncContent>
           </div>
         </>
       )}

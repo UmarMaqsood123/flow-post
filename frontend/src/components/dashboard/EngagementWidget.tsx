@@ -6,27 +6,34 @@ import { buttonStyles } from "@/components/ui/buttonStyles";
 import Skeleton from "@/components/ui/Skeleton";
 import { formatCompactNumber, formatShortDay } from "@/lib/format";
 import { paths } from "@/routing/paths";
-import type { EngagementSummary, MetricWithChange } from "@/types/dashboard";
+import type { AnalyticsMetric } from "@/types/analytics";
+import type { EngagementSummary } from "@/types/dashboard";
 import WidgetCard from "./WidgetCard";
 
 const SKELETON_BARS = [40, 55, 35, 60, 50, 70, 45, 65, 55, 75, 60, 80, 70, 85];
 
 interface EngagementWidgetProps {
   engagement?: EngagementSummary;
-  rate?: MetricWithChange;
+  /** Metrics the connected platforms report; the rest are left out entirely. */
+  availableMetrics?: AnalyticsMetric[];
   isLoading: boolean;
   className?: string;
 }
 
-function EngagementWidget({ engagement, rate, isLoading, className }: EngagementWidgetProps) {
+function EngagementWidget({
+  engagement,
+  availableMetrics = [],
+  isLoading,
+  className,
+}: EngagementWidgetProps) {
   const daily = engagement?.daily ?? [];
-  const total = daily.reduce((sum, day) => sum + day.engagements, 0);
-  const max = Math.max(1, ...daily.map((day) => day.engagements));
-  const min = Math.min(...daily.map((day) => day.engagements));
+  const total = daily.reduce((sum, day) => sum + day.engagement, 0);
+  const max = Math.max(1, ...daily.map((day) => day.engagement));
+  const min = Math.min(...daily.map((day) => day.engagement));
   const totals = engagement?.totals;
 
   return (
-    <WidgetCard title="Engagement" description="Last 14 days" icon={Heart} className={className}>
+    <WidgetCard title="Engagement" description="Last 30 days" icon={Heart} className={className}>
       <AsyncContent
         isLoading={isLoading}
         isEmpty={total === 0}
@@ -62,9 +69,7 @@ function EngagementWidget({ engagement, rate, isLoading, className }: Engagement
         <div className="flex flex-col gap-5">
           <div>
             <p className="text-3xl font-semibold tracking-tight">{formatCompactNumber(total)}</p>
-            <p className="text-sm text-muted">
-              engagements{rate ? ` · ${rate.value}% engagement rate` : ""}
-            </p>
+            <p className="text-sm text-muted">likes, comments, shares and saves</p>
           </div>
 
           <div>
@@ -76,9 +81,9 @@ function EngagementWidget({ engagement, rate, isLoading, className }: Engagement
               {daily.map((day) => (
                 <div
                   key={day.date}
-                  title={`${formatShortDay(day.date)}: ${day.engagements} engagements`}
+                  title={`${formatShortDay(day.date)}: ${day.engagement} engagement`}
                   className="flex-1 rounded-t bg-primary/70 transition-colors hover:bg-primary"
-                  style={{ height: `${Math.max(4, (day.engagements / max) * 100)}%` }}
+                  style={{ height: `${Math.max(4, (day.engagement / max) * 100)}%` }}
                 />
               ))}
             </div>
@@ -92,20 +97,30 @@ function EngagementWidget({ engagement, rate, isLoading, className }: Engagement
 
           {totals && (
             <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-              {[
-                { label: "Impressions", value: totals.impressions, icon: Eye },
-                { label: "Likes", value: totals.likes, icon: Heart },
-                { label: "Comments", value: totals.comments, icon: MessageCircle },
-                { label: "Shares", value: totals.shares, icon: Repeat2 },
-              ].map(({ label, value, icon: Icon }) => (
-                <div key={label} className="rounded-lg bg-slate-50 px-3 py-2.5">
-                  <dt className="flex items-center gap-1.5 text-xs text-muted">
-                    <Icon className="size-3.5" aria-hidden="true" />
-                    {label}
-                  </dt>
-                  <dd className="mt-0.5 text-lg font-semibold">{formatCompactNumber(value)}</dd>
-                </div>
-              ))}
+              {(
+                [
+                  { label: "Views", metric: "views", icon: Eye },
+                  { label: "Likes", metric: "likes", icon: Heart },
+                  { label: "Comments", metric: "comments", icon: MessageCircle },
+                  { label: "Shares", metric: "shares", icon: Repeat2 },
+                ] as const
+              )
+                // A metric no connected platform reports is hidden, not zeroed.
+                .filter(({ metric }) => availableMetrics.includes(metric))
+                .map(({ label, metric, icon: Icon }) => ({
+                  label,
+                  value: totals[metric] ?? 0,
+                  icon: Icon,
+                }))
+                .map(({ label, value, icon: Icon }) => (
+                  <div key={label} className="rounded-lg bg-slate-50 px-3 py-2.5">
+                    <dt className="flex items-center gap-1.5 text-xs text-muted">
+                      <Icon className="size-3.5" aria-hidden="true" />
+                      {label}
+                    </dt>
+                    <dd className="mt-0.5 text-lg font-semibold">{formatCompactNumber(value)}</dd>
+                  </div>
+                ))}
             </dl>
           )}
         </div>

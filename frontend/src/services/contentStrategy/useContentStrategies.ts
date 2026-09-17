@@ -80,6 +80,21 @@ export function useUpdateContentStrategy(workspaceId: string) {
   });
 }
 
+export function useDeleteContentStrategy(workspaceId: string) {
+  const queryClient = useQueryClient();
+  const cache = useStrategyCache(workspaceId);
+  return useMutation({
+    mutationFn: (strategyId: string) => contentStrategyApi.remove(workspaceId, strategyId),
+    onSuccess: (_result, strategyId) => {
+      queryClient.removeQueries({
+        queryKey: queryKeys.workspaces.contentStrategy(workspaceId, strategyId),
+      });
+      // The deleted version may have been the active one other pages read.
+      void cache.refreshAll();
+    },
+  });
+}
+
 export function useActivateContentStrategy(workspaceId: string) {
   const cache = useStrategyCache(workspaceId);
   return useMutation({

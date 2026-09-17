@@ -253,7 +253,7 @@ function OnboardingWizard({ workspaceId, profile }: OnboardingWizardProps) {
                     <li key={field.path}>
                       <button
                         type="button"
-                        className="text-left underline"
+                        className="cursor-pointer text-left underline"
                         onClick={() => goTo(field.step)}
                       >
                         {ONBOARDING_STEP_INFO[field.step].title}: {field.message}

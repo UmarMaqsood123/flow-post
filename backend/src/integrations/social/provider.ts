@@ -4,6 +4,7 @@ import { SocialProviderError } from "./errors";
 import type {
   AnalyticsQuery,
   AnalyticsResult,
+  ConnectionTarget,
   AuthorizationRequest,
   AuthorizationRequestInput,
   OAuthCallbackInput,
@@ -32,6 +33,14 @@ export interface SocialOperations {
   getPost(credentials: ProviderCredentials, providerPostId: string): Promise<ProviderPost>;
   deletePost(credentials: ProviderCredentials, providerPostId: string): Promise<void>;
   getAnalytics(credentials: ProviderCredentials, query: AnalyticsQuery): Promise<AnalyticsResult>;
+  /**
+   * Optional. Platforms where one authorization can manage several accounts
+   * implement both of these: the user is shown the targets and picks one, which
+   * is then turned into the account we store. Providers without them connect
+   * whatever `handleOAuthCallback` returned.
+   */
+  listConnectionTargets?(tokens: OAuthTokenSet): Promise<ConnectionTarget[]>;
+  connectTarget?(tokens: OAuthTokenSet, targetId: string): Promise<OAuthConnection>;
 }
 
 /**

@@ -5,6 +5,7 @@ import {
   VERSION_SOURCES,
   type VersionSourceValue,
 } from "../constants/post.constant";
+import { VIDEO_FORMATS, type VideoFormatValue } from "../constants/media.constant";
 import type { PostContent } from "../validators/post.validator";
 import { workspaceScopedPlugin } from "./plugins/workspaceScoped.plugin";
 
@@ -25,6 +26,13 @@ export interface IPostVersion {
   version: number;
   /** Validated with postContentSchema before every write. */
   content: PostContent;
+  /**
+   * Media library files attached to this version, in the order they're posted.
+   * Kept per version so restoring an old version brings its media back too.
+   */
+  media: Types.ObjectId[];
+  /** How a video is published where the platform has more than one kind; null without video. */
+  videoFormat: VideoFormatValue | null;
   source: VersionSourceValue;
   /** Short human-readable description, e.g. "Tone changed to Friendly". */
   label: string;
@@ -57,6 +65,8 @@ const PostVersionSchema = new Schema<IPostVersion>(
     post: { type: Schema.Types.ObjectId, ref: "Post", required: true },
     version: { type: Number, required: true, min: 1 },
     content: { type: Schema.Types.Mixed, required: true },
+    media: { type: [{ type: Schema.Types.ObjectId, ref: "File" }], default: [] },
+    videoFormat: { type: String, enum: [...VIDEO_FORMATS, null], default: null },
     source: { type: String, enum: VERSION_SOURCES, required: true },
     label: { type: String, required: true, maxlength: 120 },
     instructions: { type: String, default: null, maxlength: LIMITS.instructions },
@@ -69,6 +79,8 @@ const PostVersionSchema = new Schema<IPostVersion>(
 
 PostVersionSchema.index({ post: 1, version: -1 });
 PostVersionSchema.index({ post: 1, version: 1 }, { unique: true });
+// Loading current versions and searching content within one workspace.
+PostVersionSchema.index({ workspace: 1, post: 1 });
 
 PostVersionSchema.plugin(workspaceScopedPlugin);
 

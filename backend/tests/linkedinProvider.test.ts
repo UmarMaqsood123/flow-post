@@ -298,7 +298,7 @@ describe("LinkedIn publishing", () => {
     const { fetch, requests } = fakeLinkedIn([
       {
         method: "POST",
-        match: (url) => url.href === "https://api.linkedin.com/rest/assets?action=registerUpload",
+        match: (url) => url.href === "https://api.linkedin.com/v2/assets?action=registerUpload",
         respond: () =>
           json(200, {
             value: {
@@ -319,10 +319,18 @@ describe("LinkedIn publishing", () => {
           url.hostname === "www.linkedin.com" && url.pathname.startsWith("/dms-uploads/"),
         respond: () => new Response(null, { status: 201 }),
       },
-      postsRoute(createdPost),
+      {
+        method: "POST",
+        match: (url) => url.href === "https://api.linkedin.com/v2/ugcPosts",
+        respond: () =>
+          new Response(JSON.stringify({ id: "urn:li:ugcPost:7120000000000000001" }), {
+            status: 201,
+            headers: { "Content-Type": "application/json" },
+          }),
+      },
     ]);
 
-    await createProvider(fetch).publishImage(credentials, {
+    const result = await createProvider(fetch).publishImage(credentials, {
       text: "Our new office",
       images: [
         {
@@ -349,9 +357,29 @@ describe("LinkedIn publishing", () => {
     expect(upload?.headers.get("content-type")).toBe("image/png");
     expect(upload?.headers.get("media-type-family")).toBe("STILLIMAGE");
     expect(Buffer.from(upload?.body as Uint8Array).equals(bytes)).toBe(true);
-    expect(post && jsonBody(post)).toMatchObject({
-      commentary: "Our new office",
-      content: { media: { id: "urn:li:image:C5622AQHdBDflPp0pEg", altText: "Office" } },
+    // The versioned upload is partner-only, so no LinkedIn-Version header goes to v2.
+    expect(register?.headers.get("linkedin-version")).toBeNull();
+    expect(post && jsonBody(post)).toEqual({
+      author: "urn:li:person:782bbtaQ",
+      lifecycleState: "PUBLISHED",
+      specificContent: {
+        "com.linkedin.ugc.ShareContent": {
+          shareCommentary: { text: "Our new office" },
+          shareMediaCategory: "IMAGE",
+          media: [
+            {
+              status: "READY",
+              media: "urn:li:digitalmediaAsset:C5622AQHdBDflPp0pEg",
+              description: { text: "Office" },
+            },
+          ],
+        },
+      },
+      visibility: { "com.linkedin.ugc.MemberNetworkVisibility": "PUBLIC" },
+    });
+    expect(result).toMatchObject({
+      providerPostId: "urn:li:ugcPost:7120000000000000001",
+      url: "https://www.linkedin.com/feed/update/urn:li:ugcPost:7120000000000000001/",
     });
   });
 
@@ -375,7 +403,7 @@ describe("LinkedIn publishing", () => {
     const hostile = fakeLinkedIn([
       {
         method: "POST",
-        match: (url) => url.pathname === "/rest/assets",
+        match: (url) => url.pathname === "/v2/assets",
         respond: () =>
           json(200, {
             value: {

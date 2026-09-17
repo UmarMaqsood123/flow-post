@@ -17,11 +17,20 @@ import {
   type RefinePostPromptInput,
 } from "../integrations/ai/postContent";
 import {
+  applyStyleRules,
   characterCount,
+  findBuzzwords,
   normalizeHashtags,
   normalizeStrategyContent,
 } from "../integrations/ai/postprocess";
-import { PROMPTS, type PromptTemplate } from "../integrations/ai/prompts";
+import {
+  type AutopilotTopicPromptInput,
+  type PerformanceInsightsPromptInput,
+  PROMPTS,
+  type PromptTemplate,
+} from "../integrations/ai/prompts";
+import type { IPerformanceFact } from "../models/performanceInsightReport.model";
+import type { PerformanceInsightsOutput } from "../validators/insights.validator";
 import { type BrandContext, buildBrandContext } from "../integrations/ai/prompts/brandContext";
 import { PLATFORM_GUIDELINES } from "../integrations/ai/prompts/platforms";
 import { getAIProvider } from "../integrations/ai/registry";
@@ -42,6 +51,7 @@ import type {
 import { strategyContentSchema } from "../validators/contentStrategy.validator";
 import { postContentSchema } from "../validators/post.validator";
 import * as BrandProfileService from "./brandProfile.service";
+import * as EntitlementService from "./entitlement.service";
 
 const DAY_MS = 86_400_000;
 
@@ -195,6 +205,9 @@ const run = async <Input, Output, Result>(
     );
   }
 
+  // Counted per billing period across every workspace the billing owner pays for.
+  await EntitlementService.assertCanGenerateAI(context.workspace);
+
   const brand = buildBrandContext(await BrandProfileService.getBrandProfile(context));
   const model = provider.defaultModel;
   const startedAt = Date.now();
@@ -266,7 +279,9 @@ const run = async <Input, Output, Result>(
     requestId: result.requestId,
   });
 
-  const { data, warnings = [] } = finalize(result.data, brand);
+  // The style rules are part of every prompt, but models slip, so the
+  // mechanical parts of them are enforced on the way out.
+  const { data, warnings = [] } = finalize(applyStyleRules(result.data), brand);
   if (!brand.complete) {
     warnings.unshift("The brand profile isn't complete, so results may be generic.");
   }
@@ -293,6 +308,14 @@ const lengthWarning = (platform: SocialPlatformValue, text: string) => {
   const length = characterCount(text);
   return length > maxCharacters
     ? `The ${label} version is ${length.toLocaleString("en-US")} characters; the limit is ${maxCharacters.toLocaleString("en-US")}.`
+    : null;
+};
+
+/** Buzzwords aren't rewritten automatically, since swapping them changes meaning. */
+const buzzwordWarning = (platform: SocialPlatformValue, content: unknown) => {
+  const found = findBuzzwords(JSON.stringify(content));
+  return found.length > 0
+    ? `The ${PLATFORM_GUIDELINES[platform].label} version uses ${found.map((word) => `"${word}"`).join(", ")}. Rewrite or regenerate it if you want that out.`
     : null;
 };
 
@@ -329,7 +352,10 @@ const validateAIOutput = <T>(
 
 // ── Operations ─────────────────────────────────────────────
 
-export const generateContentStrategy = (context: WorkspaceContext, input: ContentStrategyInput) =>
+export const generateContentStrategy = (
+  context: WorkspaceContext,
+  input: ContentStrategyInput & { insights?: string | null },
+) =>
   run(context, PROMPTS.CONTENT_STRATEGY, input, (output) => ({
     data: validateAIOutput(
       strategyContentSchema,
@@ -432,8 +458,9 @@ export const createPosts = (context: WorkspaceContext, input: CreatePostsPromptI
         context,
         "a post",
       );
-      const warning = lengthWarning(platform, prepared.text);
-      if (warning) warnings.push(warning);
+      warnings.push(
+        ...warningsOf(lengthWarning(platform, prepared.text), buzzwordWarning(platform, prepared)),
+      );
       return [{ platform, content: prepared }];
     });
 
@@ -449,6 +476,95 @@ export const createPosts = (context: WorkspaceContext, input: CreatePostsPromptI
     return { data: { drafts }, warnings };
   });
 
+export interface CheckedInsight {
+  category: PerformanceInsightsOutput["insights"][number]["category"];
+  title: string;
+  interpretation: string;
+  recommendation: string;
+  factIds: string[];
+}
+
+/**
+ * Why an AI insight breaks the rules, or null when it's usable. The rules are
+ * what keep calculated metrics and AI interpretation apart:
+ * - no digits anywhere, so every number a person sees is a calculated one;
+ * - every cited fact exists and belongs to the insight's category;
+ * - it isn't resting only on facts with too few posts to mean anything.
+ */
+export const insightProblem = (
+  insight: PerformanceInsightsOutput["insights"][number],
+  facts: Map<string, IPerformanceFact>,
+): string | null => {
+  if (
+    [insight.title, insight.interpretation, insight.recommendation].some((text) => /\d/.test(text))
+  ) {
+    return "contains a number the AI wrote itself";
+  }
+  if (!insight.title.trim() || !insight.interpretation.trim() || !insight.recommendation.trim()) {
+    return "is missing its text";
+  }
+  const cited = insight.factIds.map((id) => facts.get(id));
+  if (cited.some((fact) => !fact)) return "cites a fact that doesn't exist";
+  if (cited.some((fact) => fact!.category !== insight.category)) {
+    return "cites facts from another category";
+  }
+  if (cited.every((fact) => fact!.confidence === "LOW")) {
+    return "rests only on facts with too few posts";
+  }
+  return null;
+};
+
+/**
+ * Reads calculated performance facts and writes interpretation and advice.
+ * Insights that break the rules are dropped here, before anything is stored,
+ * and counted so the report can say how many were thrown away.
+ */
+export const generatePerformanceInsights = (
+  context: WorkspaceContext,
+  input: PerformanceInsightsPromptInput,
+) =>
+  run(context, PROMPTS.PERFORMANCE_INSIGHTS, input, (output) => {
+    const facts = new Map(input.facts.map((fact) => [fact.id, fact]));
+    const accepted: CheckedInsight[] = [];
+    let rejected = 0;
+    for (const insight of output.insights) {
+      const problem = insightProblem(insight, facts);
+      if (problem) {
+        rejected += 1;
+        logger.warn(
+          { workspaceId: context.workspace.id, category: insight.category, problem },
+          "AI insight rejected",
+        );
+        continue;
+      }
+      accepted.push({
+        category: insight.category,
+        title: insight.title.trim(),
+        interpretation: insight.interpretation.trim(),
+        recommendation: insight.recommendation.trim(),
+        factIds: [...new Set(insight.factIds)],
+      });
+    }
+    return { data: { insights: accepted, rejected } };
+  });
+
+/** Topic candidates for Autopilot, trimmed and without repeats among themselves. */
+export const selectAutopilotTopics = (
+  context: WorkspaceContext,
+  input: AutopilotTopicPromptInput,
+) =>
+  run(context, PROMPTS.AUTOPILOT_TOPIC, input, (output) => {
+    const seen = new Set<string>();
+    const topics = output.topics.flatMap(({ topic, angle }) => {
+      const trimmed = topic.trim();
+      const key = comparableText(trimmed);
+      if (!trimmed || seen.has(key)) return [];
+      seen.add(key);
+      return [{ topic: trimmed, angle: angle.trim() }];
+    });
+    return { data: { topics } };
+  });
+
 /** Applies one change (shorten, expand, change tone, improve hook or CTA, emoji, hashtags). */
 export const refinePostContent = (context: WorkspaceContext, input: RefinePostPromptInput) =>
   run(context, PROMPTS.REFINE_POST, input, (output) => {
@@ -458,7 +574,13 @@ export const refinePostContent = (context: WorkspaceContext, input: RefinePostPr
       context,
       "a post",
     );
-    return { data: content, warnings: warningsOf(lengthWarning(input.platform, content.text)) };
+    return {
+      data: content,
+      warnings: warningsOf(
+        lengthWarning(input.platform, content.text),
+        buzzwordWarning(input.platform, content),
+      ),
+    };
   });
 
 // ── Reporting ──────────────────────────────────────────────

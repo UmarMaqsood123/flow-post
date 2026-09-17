@@ -2,6 +2,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useState } from "react";
 import { Controller, useForm } from "react-hook-form";
 import { useNavigate } from "react-router";
+import { ConfirmModal } from "@/components/modals";
 import PageLoader from "@/components/shared/PageLoader";
 import SettingsCard from "@/components/shared/SettingsCard";
 import Alert from "@/components/ui/Alert";
@@ -30,6 +31,7 @@ import useRevokeInvitation from "@/services/workspace/useRevokeInvitation";
 import useWorkspaceInvitations from "@/services/workspace/useWorkspaceInvitations";
 import useWorkspaceMembers from "@/services/workspace/useWorkspaceMembers";
 import type { WorkspaceMember, WorkspaceRole } from "@/types/workspace";
+import { notify } from "@/lib/toast";
 
 const formatDate = (value: string) =>
   new Date(value).toLocaleDateString(undefined, {
@@ -47,7 +49,6 @@ function InviteMemberForm({
 }) {
   const inviteMember = useInviteMember(workspaceId);
   const [formError, setFormError] = useState<string | null>(null);
-  const [sentTo, setSentTo] = useState<string | null>(null);
   const assignableRoles = INVITABLE_ROLES.filter((role) => canAssignRole(actorRole, role));
   const defaultRole: InviteMemberValues["role"] = assignableRoles.includes("EDITOR")
     ? "EDITOR"
@@ -71,11 +72,10 @@ function InviteMemberForm({
 
   const onSubmit = handleSubmit(async ({ email, role }) => {
     setFormError(null);
-    setSentTo(null);
     try {
       await inviteMember.mutateAsync({ email, role });
       reset({ email: "", role });
-      setSentTo(email);
+      notify.success(`Invitation sent to ${email}.`);
     } catch (error) {
       if (error instanceof ApiError && error.code === "CONFLICT") {
         setError("email", { type: "server", message: error.message });
@@ -88,7 +88,6 @@ function InviteMemberForm({
   return (
     <form onSubmit={onSubmit} noValidate className="flex flex-col gap-4">
       {formError && <Alert variant="error">{formError}</Alert>}
-      {sentTo && <Alert variant="success">Invitation sent to {sentTo}.</Alert>}
 
       <div className="grid items-start gap-4 sm:grid-cols-[1fr_10rem_auto]">
         <TextField
@@ -144,18 +143,26 @@ function MemberRow({ member, actorRole, isSelf, workspaceId, workspaceName }: Me
   const roleOptions: DropdownOption<WorkspaceRole>[] = WORKSPACE_ROLES.filter(
     (role) => role === member.role || canAssignRole(actorRole, role),
   ).map((role) => ({ name: ROLE_LABELS[role], value: role, description: ROLE_DESCRIPTIONS[role] }));
-  const error = changeRole.error ?? removeMember.error;
+  // Removal errors show in the confirmation, so only role changes show here.
+  const error = changeRole.error;
+  const [isRemoveOpen, setIsRemoveOpen] = useState(false);
 
   const handleRemove = () => {
-    const message = isSelf
-      ? `Leave "${workspaceName}"? You'll need a new invitation to rejoin.`
-      : `Remove ${member.user.name} from "${workspaceName}"?`;
-    if (!window.confirm(message)) return;
+    removeMember.reset();
+    setIsRemoveOpen(true);
+  };
+
+  const confirmRemove = () =>
     removeMember.mutate(
       { memberId: member.id, isSelf },
-      { onSuccess: () => isSelf && navigate(paths.dashboard) },
+      {
+        onSuccess: () => {
+          setIsRemoveOpen(false);
+          notify.success(isSelf ? "You left the workspace." : `${member.user.name} was removed.`);
+          if (isSelf) void navigate(paths.dashboard);
+        },
+      },
     );
-  };
 
   return (
     <li className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center">
@@ -182,7 +189,14 @@ function MemberRow({ member, actorRole, isSelf, workspaceId, workspaceName }: Me
             disabled={changeRole.isPending}
             onChange={(option) => {
               if (option.value !== member.role) {
-                changeRole.mutate({ memberId: member.id, role: option.value });
+                changeRole.mutate(
+                  { memberId: member.id, role: option.value },
+                  {
+                    onSuccess: () =>
+                      notify.success(`${member.user.name} is now ${option.name.toLowerCase()}.`),
+                    onError: (error) => notify.error(error),
+                  },
+                );
               }
             }}
           />
@@ -207,6 +221,22 @@ function MemberRow({ member, actorRole, isSelf, workspaceId, workspaceName }: Me
           {getErrorMessage(error)}
         </p>
       )}
+
+      <ConfirmModal
+        open={isRemoveOpen}
+        tone="danger"
+        title={isSelf ? `Leave "${workspaceName}"?` : `Remove ${member.user.name}?`}
+        message={
+          isSelf
+            ? "You'll lose access straight away and need a new invitation to rejoin."
+            : `${member.user.name} will lose access to "${workspaceName}". You can invite them again later.`
+        }
+        confirmLabel={isSelf ? "Leave workspace" : "Remove member"}
+        isLoading={removeMember.isPending}
+        error={removeMember.error}
+        onConfirm={confirmRemove}
+        onClose={() => setIsRemoveOpen(false)}
+      />
     </li>
   );
 }
@@ -225,11 +255,6 @@ function PendingInvitations({ workspaceId }: { workspaceId: string }) {
 
   return (
     <>
-      {revokeInvitation.isError && (
-        <Alert variant="error" className="mb-3">
-          {getErrorMessage(revokeInvitation.error)}
-        </Alert>
-      )}
       <ul className="divide-y divide-line">
         {invitations.data.map((invitation) => (
           <li
@@ -251,7 +276,12 @@ function PendingInvitations({ workspaceId }: { workspaceId: string }) {
                 isLoading={
                   revokeInvitation.isPending && revokeInvitation.variables === invitation.id
                 }
-                onClick={() => revokeInvitation.mutate(invitation.id)}
+                onClick={() =>
+                  revokeInvitation.mutate(invitation.id, {
+                    onSuccess: () => notify.success(`Invitation to ${invitation.email} revoked.`),
+                    onError: (error) => notify.error(error),
+                  })
+                }
               >
                 Revoke
               </Button>

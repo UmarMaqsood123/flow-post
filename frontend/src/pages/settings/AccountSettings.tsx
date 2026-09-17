@@ -1,24 +1,26 @@
+import { useState } from "react";
 import ChangePasswordForm from "@/components/account/ChangePasswordForm";
+import { ConfirmModal } from "@/components/modals";
 import PageHeader from "@/components/shared/PageHeader";
 import SettingsCard from "@/components/shared/SettingsCard";
 import Button from "@/components/ui/Button";
-import { getErrorMessage } from "@/lib/forms";
 import useLogoutAll from "@/services/auth/useLogoutAll";
 import useResendVerification from "@/services/auth/useResendVerification";
 import useSession from "@/services/auth/useSession";
+import { notify } from "@/lib/toast";
 
 function AccountSettings() {
   const { data: user } = useSession();
   const resendVerification = useResendVerification();
   const logoutAll = useLogoutAll();
+  const [isLogoutOpen, setIsLogoutOpen] = useState(false);
 
   // ProtectedRoute guarantees a user; this narrows the type.
   if (!user) return null;
 
   const handleLogoutAll = () => {
-    if (window.confirm("Sign out of FlowPost on every device, including this one?")) {
-      logoutAll.mutate();
-    }
+    logoutAll.reset();
+    setIsLogoutOpen(true);
   };
 
   return (
@@ -48,17 +50,18 @@ function AccountSettings() {
                   <span className="font-medium text-amber-700">Not verified</span>
                   <Button
                     variant="link"
-                    onClick={() => resendVerification.mutate()}
+                    onClick={() =>
+                      resendVerification.mutate(undefined, {
+                        onSuccess: () =>
+                          notify.success(`Verification email sent to ${user.email}.`),
+                        onError: (error) => notify.error(error),
+                      })
+                    }
                     isLoading={resendVerification.isPending}
                     disabled={resendVerification.isSuccess}
                   >
                     {resendVerification.isSuccess ? "Email sent" : "Resend verification email"}
                   </Button>
-                </span>
-              )}
-              {resendVerification.isError && (
-                <span className="mt-1 block text-red-700">
-                  {getErrorMessage(resendVerification.error)}
                 </span>
               )}
             </dd>
@@ -85,11 +88,17 @@ function AccountSettings() {
         <Button variant="danger" onClick={handleLogoutAll} isLoading={logoutAll.isPending}>
           Log out of all devices
         </Button>
-        {logoutAll.isError && (
-          <p role="alert" className="mt-3 text-sm text-red-700">
-            {getErrorMessage(logoutAll.error)}
-          </p>
-        )}
+        <ConfirmModal
+          open={isLogoutOpen}
+          tone="danger"
+          title="Log out of all devices?"
+          message="You'll be signed out of FlowPost everywhere, including this device, and will need to sign in again."
+          confirmLabel="Log out everywhere"
+          isLoading={logoutAll.isPending}
+          error={logoutAll.error}
+          onConfirm={() => logoutAll.mutate()}
+          onClose={() => setIsLogoutOpen(false)}
+        />
       </SettingsCard>
     </div>
   );

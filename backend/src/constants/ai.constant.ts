@@ -9,6 +9,8 @@ export const AI_OPERATIONS = [
   "ADAPT_FOR_PLATFORM",
   "CREATE_POSTS",
   "REFINE_POST",
+  "PERFORMANCE_INSIGHTS",
+  "AUTOPILOT_TOPIC",
 ] as const;
 export type AIOperationValue = (typeof AI_OPERATIONS)[number];
 

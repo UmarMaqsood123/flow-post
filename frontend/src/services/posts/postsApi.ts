@@ -1,6 +1,8 @@
 import { api } from "@/lib/api";
 import type { ApiSuccessResponse } from "@/types/api";
 import type {
+  CalendarQuery,
+  CalendarResponse,
   GeneratedPosts,
   GeneratePostsPayload,
   ListPostsQuery,
@@ -9,7 +11,10 @@ import type {
   PostWithVersions,
   RefinePostPayload,
   RegeneratePostPayload,
+  ScheduleHistory,
+  SchedulePostInput,
   UpdatePostContentPayload,
+  UpdatePostDetailsPayload,
 } from "@/types/post";
 
 const postsPath = (workspaceId: string) => `/workspaces/${encodeURIComponent(workspaceId)}/posts`;
@@ -24,8 +29,12 @@ type PostResponse = { post: Post };
 export const postsApi = {
   list: async (workspaceId: string, query: ListPostsQuery = {}) => {
     const params = new URLSearchParams();
-    if (query.platform) params.set("platform", query.platform);
-    if (query.status) params.set("status", query.status);
+    if (query.platform?.length) params.set("platform", query.platform.join(","));
+    if (query.status?.length) params.set("status", query.status.join(","));
+    if (query.pillar?.length) params.set("pillar", query.pillar.join(","));
+    if (query.q?.trim()) params.set("q", query.q.trim());
+    if (query.hasMedia !== undefined) params.set("hasMedia", String(query.hasMedia));
+    if (query.scheduled) params.set("scheduled", query.scheduled);
     if (query.page) params.set("page", String(query.page));
     if (query.limit) params.set("limit", String(query.limit));
     const suffix = params.size > 0 ? `?${params.toString()}` : "";
@@ -84,6 +93,42 @@ export const postsApi = {
       await api.patch<PostResponse, { status: PostStatus }>(
         `${postPath(workspaceId, postId)}/status`,
         { status },
+      )
+    ).data.post,
+
+  /** The calendar grid plus the unscheduled backlog. */
+  calendar: async (workspaceId: string, query: CalendarQuery) => {
+    const params = new URLSearchParams({ from: query.from, to: query.to });
+    if (query.platform?.length) params.set("platform", query.platform.join(","));
+    if (query.status?.length) params.set("status", query.status.join(","));
+    if (query.pillar?.length) params.set("pillar", query.pillar.join(","));
+    if (query.includeUnscheduled === false) params.set("includeUnscheduled", "false");
+    return (
+      await api.get<CalendarResponse>(`${postsPath(workspaceId)}/calendar?${params.toString()}`)
+    ).data;
+  },
+
+  duplicate: async (workspaceId: string, postId: string) =>
+    (await api.post<PostResponse>(`${postPath(workspaceId, postId)}/duplicate`)).data.post,
+
+  /** `scheduledAt` is an ISO instant with an offset; null unschedules. */
+  schedule: async (workspaceId: string, postId: string, input: SchedulePostInput) =>
+    (
+      await api.patch<PostResponse, SchedulePostInput>(
+        `${postPath(workspaceId, postId)}/schedule`,
+        input,
+      )
+    ).data.post,
+
+  /** The publishing schedule for a post, with its job and attempt history. */
+  scheduleHistory: async (workspaceId: string, postId: string) =>
+    (await api.get<ScheduleHistory>(`${postPath(workspaceId, postId)}/schedule`)).data,
+
+  updateDetails: async (workspaceId: string, postId: string, payload: UpdatePostDetailsPayload) =>
+    (
+      await api.patch<PostResponse, UpdatePostDetailsPayload>(
+        `${postPath(workspaceId, postId)}/details`,
+        payload,
       )
     ).data.post,
 

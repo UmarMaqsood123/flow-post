@@ -116,19 +116,43 @@ describe("POST /auth/login", () => {
     expect(wrongPassword.body.error.code).toBe(unknownEmail.body.error.code);
   });
 
-  it("rate-limits failed attempts per account, even across IP addresses", async () => {
+  it("rate-limits failed attempts per account from one address", async () => {
     const { credentials } = await registerUser(createClient());
+    const attacker = createClient();
 
     for (let attempt = 0; attempt < 5; attempt += 1) {
-      await createClient()
+      await attacker
         .post("/login", { email: credentials.email, password: "WrongPassword1" })
         .expect(401);
     }
 
-    const blocked = await createClient()
+    const blocked = await attacker
       .post("/login", { email: credentials.email, password: VALID_PASSWORD })
       .expect(429);
     expect(blocked.body.error.code).toBe("RATE_LIMITED");
+  });
+
+  it("doesn't let someone else lock the account owner out", async () => {
+    const { credentials } = await registerUser(createClient());
+    const attacker = createClient();
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      await attacker.post("/login", { email: credentials.email, password: "WrongPassword1" });
+    }
+    await createClient()
+      .post("/login", { email: credentials.email, password: VALID_PASSWORD })
+      .expect(200);
+  });
+
+  it("still caps failures per account across many addresses", async () => {
+    const { credentials } = await registerUser(createClient());
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      await createClient()
+        .post("/login", { email: credentials.email, password: "WrongPassword1" })
+        .expect(401);
+    }
+    await createClient()
+      .post("/login", { email: credentials.email, password: VALID_PASSWORD })
+      .expect(429);
   });
 });
 

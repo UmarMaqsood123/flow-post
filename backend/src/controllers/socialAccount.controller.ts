@@ -16,6 +16,8 @@ import {
 } from "../utils/cookie.util";
 import { getWorkspaceContext } from "../utils/workspaceContext.util";
 import type {
+  ChooseConnectionTargetInput,
+  ConnectionDraftParams,
   OAuthCallbackQuery,
   PublishSocialPostInput,
   SocialAccountIdParams,
@@ -78,13 +80,16 @@ export const HandleOAuthCallback = async (req: Request, res: Response) => {
   }
 
   try {
-    const { workspaceId } = await SocialAccountService.completeConnection({
+    const { workspaceId, selection } = await SocialAccountService.completeConnection({
       platform,
       code,
       state,
       browserBinding,
     });
-    finish({ connected: "1", workspaceId });
+    // Several accounts were granted: the page asks which one to connect.
+    finish(
+      selection ? { choose: selection.draftId, workspaceId } : { connected: "1", workspaceId },
+    );
   } catch (failure) {
     if (failure instanceof AppError && failure.isOperational) {
       req.log.warn({ err: failure, platform }, "Social account connection failed");
@@ -95,6 +100,24 @@ export const HandleOAuthCallback = async (req: Request, res: Response) => {
       failure instanceof AppError ? (CALLBACK_ERROR_REASONS[failure.code] ?? "failed") : "failed";
     finish({ error: reason });
   }
+};
+
+/** The accounts a pending authorization could connect, for the picker. */
+export const ListConnectionChoices = async (req: Request, res: Response) => {
+  const { draftId } = req.params as unknown as ConnectionDraftParams;
+  const data = await SocialAccountService.listConnectionChoices(getWorkspaceContext(req), draftId);
+  sendSuccess(res, { message: "Choose an account to connect", data });
+};
+
+export const ChooseConnectionTarget = async (req: Request, res: Response) => {
+  const { draftId } = req.params as unknown as ConnectionDraftParams;
+  const { targetId } = req.body as ChooseConnectionTargetInput;
+  const account = await SocialAccountService.completeConnectionChoice(
+    getWorkspaceContext(req),
+    draftId,
+    targetId,
+  );
+  sendSuccess(res, { message: "Account connected", data: { account } });
 };
 
 export const DisconnectSocialAccount = async (req: Request, res: Response) => {

@@ -13,10 +13,16 @@ import {
   uploadMultipleFiles,
   uploadSingleFile,
 } from "../middlewares/upload.middleware";
+import { requireFeature } from "../middlewares/entitlement.middleware";
 import { validate } from "../middlewares/validate.middleware";
 import { requireWorkspace, requireWorkspaceRole } from "../middlewares/workspace.middleware";
 import { AIRouter } from "./ai.route";
 import { ContentStrategyRouter } from "./contentStrategy.route";
+import * as AnalyticsController from "../controllers/analytics.controller";
+import * as BillingController from "../controllers/billing.controller";
+import { AnalyticsRouter } from "./analytics.route";
+import { AutopilotRouter } from "./autopilot.route";
+import { InsightsRouter } from "./insights.route";
 import { PostRouter } from "./post.route";
 import {
   onboardingStepParamsSchema,
@@ -189,6 +195,14 @@ ScopedRouter.use("/ai", AIRouter);
 ScopedRouter.use("/content-strategies", ContentStrategyRouter);
 
 // AI Create: posts and their version history.
+ScopedRouter.get("/dashboard", AnalyticsController.GetDashboard);
+// The plan covering this workspace, its limits and usage. Any member can see it.
+ScopedRouter.get("/entitlements", BillingController.GetWorkspaceEntitlements);
+ScopedRouter.use("/analytics", requireFeature("analytics"), AnalyticsRouter);
+// Weekly AI performance insights; admins approve the ones that steer generation.
+ScopedRouter.use("/insights", requireFeature("analytics"), InsightsRouter);
+// Autopilot: settings, pause, approvals and its audit trail.
+ScopedRouter.use("/autopilot", AutopilotRouter);
 ScopedRouter.use("/posts", PostRouter);
 
 WorkspaceRouter.use("/:workspaceId", ScopedRouter);

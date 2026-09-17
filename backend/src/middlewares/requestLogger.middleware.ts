@@ -4,6 +4,13 @@ import { logger } from "../config/logger";
 import { API_V1_PREFIX } from "../constants/http.constant";
 
 const MAX_REQUEST_ID_LENGTH = 128;
+const REQUEST_ID_PATTERN = /^[A-Za-z0-9._:-]+$/;
+
+/**
+ * The path without the query string. Query strings can carry secrets (OAuth
+ * `code`/`state` on social callbacks, reset tokens in links), so they are never logged.
+ */
+const pathOf = (url: string | undefined) => (url ?? "").split("?")[0];
 const QUIET_PATHS = new Set([`${API_V1_PREFIX}/health/live`, `${API_V1_PREFIX}/health/ready`]);
 
 /**
@@ -17,7 +24,8 @@ export const requestLogger = pinoHttp({
     const id =
       typeof incoming === "string" &&
       incoming.length > 0 &&
-      incoming.length <= MAX_REQUEST_ID_LENGTH
+      incoming.length <= MAX_REQUEST_ID_LENGTH &&
+      REQUEST_ID_PATTERN.test(incoming)
         ? incoming
         : randomUUID();
     res.setHeader("X-Request-Id", id);
@@ -29,16 +37,16 @@ export const requestLogger = pinoHttp({
     return "info";
   },
   customSuccessMessage: (req, res, responseTime) =>
-    `${req.method} ${req.url} ${res.statusCode} ${Math.round(responseTime)}ms`,
-  customErrorMessage: (req, res) => `${req.method} ${req.url} ${res.statusCode}`,
+    `${req.method} ${pathOf(req.url)} ${res.statusCode} ${Math.round(responseTime)}ms`,
+  customErrorMessage: (req, res) => `${req.method} ${pathOf(req.url)} ${res.statusCode}`,
   autoLogging: {
-    ignore: (req) => QUIET_PATHS.has(req.url ?? ""),
+    ignore: (req) => QUIET_PATHS.has(pathOf(req.url)),
   },
   serializers: {
     req: (req) => ({
       id: req.id,
       method: req.method,
-      url: req.url,
+      url: pathOf(req.url),
       remoteAddress: req.remoteAddress,
     }),
     res: (res) => ({ statusCode: res.statusCode }),

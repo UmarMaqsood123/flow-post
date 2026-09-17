@@ -6,7 +6,7 @@ import useLogout from "@/services/auth/useLogout";
 import useSession from "@/services/auth/useSession";
 
 const itemClass =
-  "flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-sm hover:bg-slate-50 disabled:opacity-60";
+  "flex w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60";
 
 const initialsFor = (name: string) =>
   name

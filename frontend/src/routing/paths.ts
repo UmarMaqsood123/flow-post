@@ -30,6 +30,16 @@ export const paths = {
   brandProfile: "/settings/brand-profile",
   accountSettings: "/settings/account",
   workspaces: "/workspaces",
+  /** Super admin panel. */
+  admin: "/admin",
+  adminUsers: "/admin/users",
+  adminWorkspaces: "/admin/workspaces",
+  adminSubscriptions: "/admin/subscriptions",
+  adminPlans: "/admin/plans",
+  adminAIUsage: "/admin/ai-usage",
+  adminSocialConnections: "/admin/social-connections",
+  adminPublishingFailures: "/admin/publishing-failures",
+  adminAuditLog: "/admin/audit-log",
   createWorkspace: "/workspaces/new",
   /** Legacy path — redirects to account settings. */
   changePassword: "/settings/password",

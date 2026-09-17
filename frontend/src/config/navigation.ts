@@ -9,6 +9,7 @@ import {
   LayoutDashboard,
   type LucideIcon,
   Settings,
+  ShieldCheck,
   Share2,
   Users,
   WandSparkles,
@@ -23,6 +24,8 @@ export interface NavItem {
   comingSoon?: boolean;
   /** Hidden until the user has a current workspace. */
   requiresWorkspace?: boolean;
+  /** Only shown to super admins. The page and API check the role themselves. */
+  superAdminOnly?: boolean;
   /** Active for every path under this prefix (e.g. all settings tabs). */
   matchPrefix?: string;
 }
@@ -39,12 +42,12 @@ const aiCreate: NavItem = {
   icon: WandSparkles,
   requiresWorkspace: true,
 };
-const content: NavItem = { label: "Content", to: paths.content, icon: FileText, comingSoon: true };
+const content: NavItem = { label: "Content", to: paths.content, icon: FileText };
 const calendar: NavItem = {
   label: "Calendar",
   to: paths.calendar,
   icon: CalendarDays,
-  comingSoon: true,
+  requiresWorkspace: true,
 };
 
 const strategy: NavItem = {
@@ -67,8 +70,8 @@ export const NAV_SECTIONS: NavSection[] = [
   {
     title: "Growth",
     items: [
-      { label: "Analytics", to: paths.analytics, icon: ChartColumn, comingSoon: true },
-      { label: "Autopilot", to: paths.autopilot, icon: Bot, comingSoon: true },
+      { label: "Analytics", to: paths.analytics, icon: ChartColumn },
+      { label: "Autopilot", to: paths.autopilot, icon: Bot, requiresWorkspace: true },
     ],
   },
   {
@@ -82,7 +85,14 @@ export const NAV_SECTIONS: NavSection[] = [
 
 /** Pinned to the bottom of the sidebar. */
 export const NAV_FOOTER_ITEMS: NavItem[] = [
-  { label: "Billing", to: paths.billing, icon: CreditCard, comingSoon: true },
+  {
+    label: "Admin",
+    to: paths.admin,
+    icon: ShieldCheck,
+    superAdminOnly: true,
+    matchPrefix: paths.admin,
+  },
+  { label: "Billing", to: paths.billing, icon: CreditCard },
   { label: "Settings", to: paths.settings, icon: Settings, matchPrefix: paths.settings },
 ];
 

@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
-import { nestErrors } from "@/components/strategy/errorPaths";
-import { ListEditor, TextListField } from "@/components/strategy/fields";
+import { TextListField } from "@/components/strategy/fields";
 import Alert from "@/components/ui/Alert";
 import Button from "@/components/ui/Button";
 import TextAreaField from "@/components/ui/TextAreaField";
@@ -15,9 +14,9 @@ import {
 import { ApiError } from "@/lib/apiError";
 import { getErrorMessage } from "@/lib/forms";
 import { cn } from "@/lib/utils";
-import type { CreatePlatform, PostContent, ScriptScene } from "@/types/post";
+import type { CreatePlatform, PostContent } from "@/types/post";
 
-/** Maps API details like `content.script.0.scene` onto the editor's fields. */
+/** Maps API details like `content.hashtags.0` onto the editor's fields. */
 const readFieldErrors = (error: unknown) => {
   const fieldErrors: Record<string, string> = {};
   const otherMessages: string[] = [];
@@ -172,48 +171,6 @@ function PostEditor({
             value={draft.cta ?? ""}
             onChange={(event) => update({ cta: event.target.value })}
             error={fieldErrors.cta}
-            disabled={!canEdit}
-          />
-        )}
-        {fields.includes("script") && (
-          <ListEditor
-            label={FIELD_LABELS.script}
-            itemName="Scene"
-            items={draft.script}
-            max={LIMITS.scenes}
-            createItem={(): ScriptScene => ({ scene: "", voiceover: "" })}
-            onChange={(script) => update({ script })}
-            errorAt={nestErrors((path) => fieldErrors[path], "script")}
-            renderItem={(scene, updateScene, errorAt) => (
-              <>
-                <TextField
-                  label="On screen"
-                  maxLength={LIMITS.scriptLine}
-                  value={scene.scene}
-                  onChange={(event) => updateScene({ ...scene, scene: event.target.value })}
-                  error={errorAt("scene")}
-                  disabled={!canEdit}
-                />
-                <TextField
-                  label="Voiceover"
-                  maxLength={LIMITS.scriptLine}
-                  value={scene.voiceover}
-                  onChange={(event) => updateScene({ ...scene, voiceover: event.target.value })}
-                  error={errorAt("voiceover")}
-                  disabled={!canEdit}
-                />
-              </>
-            )}
-          />
-        )}
-        {fields.includes("visualIdea") && (
-          <TextAreaField
-            label={FIELD_LABELS.visualIdea}
-            rows={4}
-            maxLength={LIMITS.visualIdea}
-            value={draft.visualIdea ?? ""}
-            onChange={(event) => update({ visualIdea: event.target.value })}
-            error={fieldErrors.visualIdea}
             disabled={!canEdit}
           />
         )}

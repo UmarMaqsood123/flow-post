@@ -78,7 +78,7 @@ describe("Generating a content strategy", () => {
       generation: {
         provider: "fake",
         model: "gpt-5.6-terra-2026-08-01",
-        promptVersion: "2.0.0",
+        promptVersion: "2.2.0",
         inputTokens: 1000,
         outputTokens: 500,
         brandProfileComplete: false,
@@ -110,7 +110,7 @@ describe("Generating a content strategy", () => {
     expect(usage).toHaveLength(1);
     expect(usage[0]).toMatchObject({
       operation: "CONTENT_STRATEGY",
-      promptVersion: "2.0.0",
+      promptVersion: "2.2.0",
       status: "SUCCESS",
     });
   });
@@ -373,6 +373,66 @@ describe("Activating a strategy", () => {
         .setOptions({ skipWorkspaceScope: true })
         .exec(),
     ).rejects.toMatchObject({ code: 11000 });
+  });
+});
+
+describe("Deleting a strategy", () => {
+  const remove = (user: TestUser, strategyId: string) =>
+    call(user, "delete", `${strategiesPath()}/${strategyId}`);
+
+  it("lets editors delete drafts, and only admins delete active or previous versions", async () => {
+    const editor = await createUser("Eddie Editor");
+    await addMember(owner, workspaceId, editor, "EDITOR");
+
+    const draft = await generateId();
+    await remove(editor, draft).expect(200);
+    await call(owner, "get", `${strategiesPath()}/${draft}`).expect(404);
+
+    const first = await generateId();
+    const second = await generateId();
+    await activate(owner, first).expect(200);
+    await activate(owner, second).expect(200);
+    // `first` is now a previous version and `second` is active.
+
+    expect((await remove(editor, first).expect(403)).body.message).toMatch(/previous versions/);
+    expect((await remove(editor, second).expect(403)).body.message).toMatch(/active strategy/);
+
+    await remove(owner, first).expect(200);
+    await remove(owner, second).expect(200);
+    expect(
+      (await storedStrategies()).filter((item) => item.workspace.toString() === workspaceId),
+    ).toEqual([]);
+  });
+
+  it("leaves the workspace without an active strategy when the active one goes", async () => {
+    const strategyId = await generateId();
+    await activate(owner, strategyId).expect(200);
+
+    await remove(owner, strategyId).expect(200);
+
+    const active = await call(owner, "get", `${strategiesPath()}/active`).expect(200);
+    expect(active.body.data.strategy).toBeNull();
+    // A new strategy can be activated straight away.
+    const next = await generateId();
+    await activate(owner, next).expect(200);
+  });
+
+  it("won't delete from another workspace, or for viewers", async () => {
+    const strategyId = await generateId();
+
+    const viewer = await createUser("Vera Viewer");
+    await addMember(owner, workspaceId, viewer, "VIEWER");
+    await remove(viewer, strategyId).expect(403);
+
+    const outsider = await createUser("Olive Outsider");
+    const otherWorkspace = await createWorkspace(outsider);
+    await call(
+      outsider,
+      "delete",
+      `/workspaces/${otherWorkspace.id}/content-strategies/${strategyId}`,
+    ).expect(404);
+
+    await call(owner, "get", `${strategiesPath()}/${strategyId}`).expect(200);
   });
 });
 

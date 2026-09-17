@@ -18,7 +18,7 @@ function Navbar({ onOpenSidebar, sidebarOpen }: NavbarProps) {
         aria-label="Open navigation"
         aria-expanded={sidebarOpen}
         aria-controls="mobile-navigation"
-        className="-ml-1.5 inline-flex size-10 shrink-0 items-center justify-center rounded-md text-ink hover:bg-slate-100 lg:hidden"
+        className="-ml-1.5 inline-flex size-10 shrink-0 cursor-pointer items-center justify-center rounded-md text-ink hover:bg-slate-100 lg:hidden"
       >
         <Menu className="size-5" aria-hidden="true" />
       </button>

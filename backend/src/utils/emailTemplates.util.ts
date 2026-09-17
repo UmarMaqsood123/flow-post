@@ -107,3 +107,28 @@ export const workspaceInvitationEmailTemplate = ({
      <p style="font-size:13px;color:#64748b">This invitation expires in ${expiresInDays} days. If you weren't expecting it, you can ignore this email.</p>`,
   ),
 });
+
+export const paymentFailedEmailTemplate = ({
+  name,
+  planLabel,
+  graceUntil,
+  url,
+}: {
+  name: string;
+  planLabel: string;
+  graceUntil: Date;
+  url: string;
+}): EmailContent => {
+  const until = graceUntil.toDateString();
+  return {
+    subject: `Your ${APP_NAME} payment didn't go through`,
+    text: `Hi ${name},\n\nWe couldn't take the payment for your ${planLabel} plan. Your plan stays active until ${until} while we try again.\n\nUpdate your payment method:\n${url}\n\nIf it isn't fixed by then, your account moves to the Free plan. Nothing is deleted.`,
+    html: layout(
+      "Your payment didn't go through",
+      `<p>Hi ${escapeHtml(name)},</p>
+       <p>We couldn't take the payment for your ${escapeHtml(planLabel)} plan. Your plan stays active until <strong>${escapeHtml(until)}</strong> while we try again.</p>
+       ${button(url, "Update payment method")}
+       <p style="font-size:13px;color:#64748b">If it isn't fixed by then, your account moves to the Free plan. Nothing is deleted.</p>`,
+    ),
+  };
+};

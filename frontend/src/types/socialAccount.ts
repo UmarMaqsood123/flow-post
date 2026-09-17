@@ -24,6 +24,24 @@ export interface SocialPlatformInfo {
   capabilities: SocialCapability[];
 }
 
+/**
+ * One account a pending authorization could connect. Platforms where a single
+ * login covers several destinations (Facebook Pages, Instagram professional
+ * accounts) ask the user to choose.
+ */
+export interface ConnectionTarget {
+  id: string;
+  name: string;
+  username: string | null;
+  image: string | null;
+  description: string | null;
+}
+
+export interface ConnectionChoices {
+  platform: ConnectablePlatform;
+  targets: ConnectionTarget[];
+}
+
 /** Never contains tokens — the API only returns this public shape. */
 export interface SocialAccount {
   id: string;

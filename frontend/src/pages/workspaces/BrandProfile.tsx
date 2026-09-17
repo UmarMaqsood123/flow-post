@@ -21,7 +21,7 @@ function BrandProfilePage() {
   const isSettingUp = canEdit && profile?.onboarding.status !== "COMPLETED";
 
   return (
-    <div className="mx-auto flex w-full max-w-3xl flex-col gap-6">
+    <div className="flex w-full flex-col gap-6">
       <PageHeader
         title={isSettingUp ? "Set up your brand profile" : "Brand profile"}
         description={

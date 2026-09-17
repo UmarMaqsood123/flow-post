@@ -1,5 +1,10 @@
 import { api } from "@/lib/api";
-import type { ConnectablePlatform, SocialAccount, SocialPlatformInfo } from "@/types/socialAccount";
+import type {
+  ConnectablePlatform,
+  ConnectionChoices,
+  SocialAccount,
+  SocialPlatformInfo,
+} from "@/types/socialAccount";
 
 const workspaceAccountsPath = (workspaceId: string) =>
   `/workspaces/${encodeURIComponent(workspaceId)}/social-accounts`;
@@ -30,6 +35,38 @@ export const socialAccountsApi = {
         { params: { workspaceId } },
       )
     ).data,
+
+  /** The accounts a pending authorization could connect. */
+  listConnectionChoices: async ({
+    draftId,
+    workspaceId,
+  }: {
+    draftId: string;
+    workspaceId: string;
+  }) =>
+    (
+      await api.get<ConnectionChoices>(
+        `/social-accounts/connections/${encodeURIComponent(draftId)}`,
+        { params: { workspaceId } },
+      )
+    ).data,
+
+  chooseConnectionTarget: async ({
+    draftId,
+    workspaceId,
+    targetId,
+  }: {
+    draftId: string;
+    workspaceId: string;
+    targetId: string;
+  }) =>
+    (
+      await api.post<{ account: SocialAccount }, { targetId: string }>(
+        `/social-accounts/connections/${encodeURIComponent(draftId)}`,
+        { targetId },
+        { params: { workspaceId } },
+      )
+    ).data.account,
 
   disconnect: async (accountId: string) => {
     await api.delete<null>(`/social-accounts/${encodeURIComponent(accountId)}`);

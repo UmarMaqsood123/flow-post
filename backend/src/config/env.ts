@@ -101,15 +101,93 @@ const envSchema = z
     OPENAI_API_KEY: optionalString,
     OPENAI_MODEL: optionalString,
     OPENAI_BASE_URL: z.url().default("https://api.openai.com/v1"),
-    // AI provider used by services/ai.service.ts. `none` disables AI features.
-    AI_PROVIDER: z.enum(["openai", "none"]).default("openai"),
+    /**
+     * AI provider used by services/ai.service.ts:
+     * - `openai`: OpenAI's Responses API (paid).
+     * - `openai-compatible`: any service speaking OpenAI's Chat Completions API —
+     *   Groq, Gemini's compatibility endpoint, OpenRouter, Ollama, LM Studio.
+     * - `none`: AI features are switched off.
+     */
+    AI_PROVIDER: z.enum(["openai", "openai-compatible", "none"]).default("openai"),
+    /** For `openai-compatible`: e.g. https://api.groq.com/openai/v1 */
+    AI_BASE_URL: optionalString,
+    /** Optional: local runtimes like Ollama need no key. */
+    AI_API_KEY: optionalString,
+    AI_MODEL: optionalString,
+    /** `json_object` is the fallback for models that can't enforce a schema. */
+    AI_STRUCTURED_MODE: z.enum(["json_schema", "json_object"]).default("json_schema"),
+    /** Name recorded on usage records and logs, e.g. "groq". */
+    AI_PROVIDER_LABEL: optionalString,
     // Per attempt; retries use exponential backoff and honor Retry-After.
     AI_REQUEST_TIMEOUT_MS: z.coerce.number().int().min(1000).max(300_000).default(60_000),
     AI_MAX_RETRIES: z.coerce.number().int().min(0).max(5).default(2),
     // Upper bound per request; prompts may ask for less.
     AI_MAX_OUTPUT_TOKENS: z.coerce.number().int().min(256).max(32_000).default(16_000),
+    // Publishing worker (BullMQ over Redis)
+    PUBLISH_CONCURRENCY: z.coerce.number().int().min(1).max(50).default(5),
+    /**
+     * Video uploads read the whole file into memory, so each worker process sends at
+     * most this many at once (others wait). Size worker memory for this × the largest video.
+     */
+    PUBLISH_VIDEO_CONCURRENCY: z.coerce.number().int().min(1).max(20).default(2),
+    PUBLISH_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(10).default(3),
+    /** First retry delay; it doubles on each further attempt. */
+    PUBLISH_BACKOFF_MS: z.coerce.number().int().min(1000).max(3_600_000).default(60_000),
+    /** A claimed job older than this is treated as left behind by a crashed worker. */
+    PUBLISH_LOCK_TIMEOUT_MS: z.coerce.number().int().min(30_000).max(3_600_000).default(300_000),
+    /**
+     * How long the worker waits for in-flight publishes when stopping. Video uploads
+     * take minutes; the orchestrator's grace period (e.g. terminationGracePeriodSeconds)
+     * must be at least this long.
+     */
+    WORKER_SHUTDOWN_TIMEOUT_MS: z.coerce.number().int().min(15_000).max(3_600_000).default(300_000),
+    /** How often the worker sweeps for abandoned jobs and missing queue entries. */
+    PUBLISH_RECOVERY_INTERVAL_MS: z.coerce
+      .number()
+      .int()
+      .min(10_000)
+      .max(3_600_000)
+      .default(60_000),
+
+    /** How often the worker sweeps for workspaces whose metrics are stale. */
+    ANALYTICS_COLLECTION_INTERVAL_MS: z.coerce
+      .number()
+      .int()
+      .min(60_000)
+      .max(86_400_000)
+      .default(3_600_000),
+
+    /** How often the worker plans and writes Autopilot posts. */
+    AUTOPILOT_SWEEP_INTERVAL_MS: z.coerce
+      .number()
+      .int()
+      .min(30_000)
+      .max(3_600_000)
+      .default(300_000),
+
     STRIPE_SECRET_KEY: optionalString,
     STRIPE_WEBHOOK_SECRET: optionalString,
+    /** Stripe price ids for each paid plan. Yearly prices are optional. */
+    STRIPE_PRICE_CREATOR_MONTHLY: optionalString,
+    STRIPE_PRICE_CREATOR_YEARLY: optionalString,
+    STRIPE_PRICE_PRO_MONTHLY: optionalString,
+    STRIPE_PRICE_PRO_YEARLY: optionalString,
+    STRIPE_PRICE_AGENCY_MONTHLY: optionalString,
+    STRIPE_PRICE_AGENCY_YEARLY: optionalString,
+    /** Days a past-due subscription keeps its plan while Stripe retries the payment. */
+    BILLING_GRACE_DAYS: z.coerce.number().int().min(0).max(30).default(7),
+    /**
+     * The plan for accounts without a paid subscription. FREE in production;
+     * self-hosted installs without Stripe can set a higher plan.
+     */
+    BILLING_DEFAULT_PLAN: z.enum(["FREE", "CREATOR", "PRO", "AGENCY"]).default("FREE"),
+    /** How often the worker re-reads subscriptions from Stripe, in case a webhook was missed. */
+    BILLING_SYNC_INTERVAL_MS: z.coerce
+      .number()
+      .int()
+      .min(60_000)
+      .max(86_400_000)
+      .default(21_600_000),
     LINKEDIN_CLIENT_ID: optionalString,
     LINKEDIN_CLIENT_SECRET: optionalString,
     META_APP_ID: optionalString,
@@ -118,6 +196,10 @@ const envSchema = z
     TIKTOK_CLIENT_SECRET: optionalString,
     GOOGLE_CLIENT_ID: optionalString,
     GOOGLE_CLIENT_SECRET: optionalString,
+    // TikTok rejects redirect URIs with a query string, and requires HTTPS.
+    TIKTOK_REDIRECT_URI: optionalString,
+    // Google OAuth client for the YouTube Data API.
+    GOOGLE_REDIRECT_URI: optionalString,
 
     // Social integrations: key that encrypts OAuth tokens at rest (AES-256-GCM).
     TOKEN_ENCRYPTION_KEY: optionalString,
@@ -141,6 +223,16 @@ const envSchema = z
       .string()
       .regex(/^\d{6}$/, "LINKEDIN_API_VERSION must be in YYYYMM format")
       .default("202608"),
+
+    // Meta app (Business type, using Facebook Login for Business). One app covers
+    // both platforms, but each has its own callback path, so each redirect URI is
+    // registered and configured separately.
+    META_FACEBOOK_REDIRECT_URI: optionalString,
+    META_INSTAGRAM_REDIRECT_URI: optionalString,
+    META_GRAPH_VERSION: z
+      .string()
+      .regex(/^v\d+\.\d+$/, "META_GRAPH_VERSION must look like v26.0")
+      .default("v26.0"),
   })
   .superRefine((value, ctx) => {
     if (value.STORAGE_PROVIDER === "oci") {
@@ -169,6 +261,37 @@ const envSchema = z
         });
       }
     }
+    if (value.NODE_ENV === "production") {
+      // Behind a load balancer, trust proxy 0 makes every client share the
+      // balancer's IP, so one noisy client rate-limits everyone.
+      if (value.TRUST_PROXY < 1) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["TRUST_PROXY"],
+          message:
+            "TRUST_PROXY must be the number of proxies in front of the API (at least 1) in production",
+        });
+      }
+      // Per-process counters multiply every limit by the number of instances.
+      if (value.RATE_LIMIT_STORE !== "redis") {
+        ctx.addIssue({
+          code: "custom",
+          path: ["RATE_LIMIT_STORE"],
+          message: "RATE_LIMIT_STORE must be redis in production",
+        });
+      }
+      const insecure = [value.FRONTEND_URL, ...value.CORS_ORIGINS].filter(
+        (url) => !url.startsWith("https://"),
+      );
+      if (insecure.length > 0) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["CORS_ORIGINS"],
+          message: `FRONTEND_URL and CORS_ORIGINS must be https:// in production (got ${insecure.join(", ")})`,
+        });
+      }
+    }
+
     if (value.NODE_ENV === "production" && value.STORAGE_PROVIDER === "memory") {
       ctx.addIssue({
         code: "custom",
@@ -204,37 +327,99 @@ const envSchema = z
         message: "Each previous key must be 32 random bytes, base64-encoded",
       });
     }
-    const linkedInKeys = [
-      "LINKEDIN_CLIENT_ID",
-      "LINKEDIN_CLIENT_SECRET",
-      "LINKEDIN_REDIRECT_URI",
+    /**
+     * A social integration is all-or-nothing: half-configured credentials fail
+     * at connect time, which is much harder to diagnose than a boot error.
+     */
+    const requireCredentialGroup = (
+      label: string,
+      keys: readonly (keyof typeof value)[],
+      redirectKey: keyof typeof value,
+    ) => {
+      if (!keys.some((key) => value[key])) return;
+      for (const key of keys) {
+        if (!value[key]) {
+          ctx.addIssue({
+            code: "custom",
+            path: [key as string],
+            message: `${String(key)} is required to enable ${label} (set all of ${keys.join(", ")})`,
+          });
+        }
+      }
+      const redirectUri = value[redirectKey];
+      if (typeof redirectUri !== "string" || !redirectUri) return;
+      let redirect: URL | null = null;
+      try {
+        redirect = new URL(redirectUri);
+      } catch {
+        ctx.addIssue({
+          code: "custom",
+          path: [redirectKey as string],
+          message: `${String(redirectKey)} must be an absolute URL`,
+        });
+      }
+      if (redirect && value.NODE_ENV === "production" && redirect.protocol !== "https:") {
+        ctx.addIssue({
+          code: "custom",
+          path: [redirectKey as string],
+          message: `${String(redirectKey)} must use HTTPS in production`,
+        });
+      }
+    };
+
+    // Billing needs the key, the webhook secret and at least the monthly prices together.
+    const billingKeys = [
+      "STRIPE_SECRET_KEY",
+      "STRIPE_WEBHOOK_SECRET",
+      "STRIPE_PRICE_CREATOR_MONTHLY",
+      "STRIPE_PRICE_PRO_MONTHLY",
+      "STRIPE_PRICE_AGENCY_MONTHLY",
     ] as const;
-    if (linkedInKeys.some((key) => value[key])) {
-      for (const key of linkedInKeys) {
+    if (billingKeys.some((key) => value[key])) {
+      for (const key of billingKeys) {
         if (!value[key]) {
           ctx.addIssue({
             code: "custom",
             path: [key],
-            message: `${key} is required to enable LinkedIn (set all of ${linkedInKeys.join(", ")})`,
+            message: `${key} is required to enable Stripe billing (set all of ${billingKeys.join(", ")})`,
           });
         }
       }
-      if (value.LINKEDIN_REDIRECT_URI) {
-        let redirect: URL | null = null;
-        try {
-          redirect = new URL(value.LINKEDIN_REDIRECT_URI);
-        } catch {
+    }
+
+    requireCredentialGroup(
+      "LinkedIn",
+      ["LINKEDIN_CLIENT_ID", "LINKEDIN_CLIENT_SECRET", "LINKEDIN_REDIRECT_URI"],
+      "LINKEDIN_REDIRECT_URI",
+    );
+    // One Meta app serves both, but each platform needs its own callback URL.
+    requireCredentialGroup(
+      "Facebook",
+      ["META_APP_ID", "META_APP_SECRET", "META_FACEBOOK_REDIRECT_URI"],
+      "META_FACEBOOK_REDIRECT_URI",
+    );
+    requireCredentialGroup(
+      "Instagram",
+      ["META_APP_ID", "META_APP_SECRET", "META_INSTAGRAM_REDIRECT_URI"],
+      "META_INSTAGRAM_REDIRECT_URI",
+    );
+    requireCredentialGroup(
+      "TikTok",
+      ["TIKTOK_CLIENT_KEY", "TIKTOK_CLIENT_SECRET", "TIKTOK_REDIRECT_URI"],
+      "TIKTOK_REDIRECT_URI",
+    );
+    requireCredentialGroup(
+      "YouTube",
+      ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_REDIRECT_URI"],
+      "GOOGLE_REDIRECT_URI",
+    );
+    if (value.AI_PROVIDER === "openai-compatible") {
+      for (const key of ["AI_BASE_URL", "AI_MODEL"] as const) {
+        if (!value[key]) {
           ctx.addIssue({
             code: "custom",
-            path: ["LINKEDIN_REDIRECT_URI"],
-            message: "LINKEDIN_REDIRECT_URI must be an absolute URL",
-          });
-        }
-        if (redirect && value.NODE_ENV === "production" && redirect.protocol !== "https:") {
-          ctx.addIssue({
-            code: "custom",
-            path: ["LINKEDIN_REDIRECT_URI"],
-            message: "LINKEDIN_REDIRECT_URI must use HTTPS in production",
+            path: [key],
+            message: `${key} is required when AI_PROVIDER=openai-compatible`,
           });
         }
       }

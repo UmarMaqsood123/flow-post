@@ -19,6 +19,8 @@ import { canAssignRole } from "../utils/workspaceRoles.util";
 import type { InviteMemberInput } from "../validators/workspace.validator";
 import * as EmailService from "./email.service";
 import type { WorkspaceSummary } from "./workspace.service";
+import * as EntitlementService from "./entitlement.service";
+import * as NotificationEvents from "./notificationEvents.service";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -105,6 +107,13 @@ export const createInvitation = async (
 
   // Re-inviting replaces the previous invitation so only the newest link works.
   const now = new Date();
+  const replacingPending = await WorkspaceInvitation.countDocuments({
+    workspace: workspace._id,
+    email,
+    status: InvitationStatus.PENDING,
+    expiresAt: { $gt: now },
+  });
+  await EntitlementService.assertCanAddTeamMember(workspace, { replacingPending });
   await WorkspaceInvitation.updateMany(
     { workspace: workspace._id, email, status: InvitationStatus.PENDING },
     { $set: { status: InvitationStatus.REVOKED, revokedAt: now } },
@@ -206,6 +215,24 @@ export const acceptInvitation = async (
     );
   }
 
+  // An invitation is only as good as its sender's current access: if they were
+  // removed or demoted since, it can't grant a role they no longer could.
+  const inviterId = invitation.invitedBy?._id;
+  const inviter = inviterId
+    ? await WorkspaceMember.findOne({ workspace: workspace._id, user: inviterId })
+    : null;
+  if (!inviter || !canAssignRole(inviter.role, invitation.role)) {
+    throw AppError.forbidden(
+      "This invitation is no longer valid because the person who sent it no longer has access. Ask for a new one.",
+    );
+  }
+
+  // The seat was counted when the invitation was sent, but the plan may have
+  // changed since, so check again (this invitation is the seat being filled).
+  if (!(await WorkspaceMember.exists({ workspace: workspace._id, user: user._id }))) {
+    await EntitlementService.assertCanAddTeamMember(workspace, { replacingPending: 1 });
+  }
+
   // Claim atomically so a token can only ever be used once.
   const claimed = await WorkspaceInvitation.findOneAndUpdate(
     { _id: invitation._id, workspace: workspace._id, status: InvitationStatus.PENDING },
@@ -228,6 +255,12 @@ export const acceptInvitation = async (
   logger.info(
     { workspaceId: workspace.id, userId: user.id, role: membership.role },
     "Workspace invitation accepted",
+  );
+  await NotificationEvents.invitationAccepted(
+    { _id: invitation._id, invitedBy: inviterId ?? null },
+    workspace,
+    user,
+    membership.role,
   );
 
   return { workspace: toPublicWorkspace(workspace), role: membership.role };

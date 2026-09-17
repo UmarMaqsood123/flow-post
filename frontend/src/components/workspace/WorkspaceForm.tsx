@@ -15,6 +15,7 @@ import {
   type WorkspaceFormValues,
   workspaceSchema,
 } from "@/schemas/workspace.schema";
+import { notify } from "@/lib/toast";
 
 interface WorkspaceFormProps {
   defaultValues: WorkspaceFormValues;
@@ -52,7 +53,6 @@ function WorkspaceForm({
     [defaultValues.timezone],
   );
   const [formError, setFormError] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
   const {
     control,
     register,
@@ -66,11 +66,10 @@ function WorkspaceForm({
 
   const submit = handleSubmit(async (values) => {
     setFormError(null);
-    setSaved(false);
     try {
       await onSubmit(values);
       reset(values);
-      setSaved(true);
+      if (successMessage) notify.success(successMessage, "workspace-saved");
     } catch (error) {
       if (!applyServerFieldErrors(error, setError, WORKSPACE_FORM_FIELDS)) {
         setFormError(getErrorMessage(error));
@@ -81,7 +80,6 @@ function WorkspaceForm({
   return (
     <form onSubmit={submit} noValidate className="flex flex-col gap-5">
       {formError && <Alert variant="error">{formError}</Alert>}
-      {saved && successMessage && <Alert variant="success">{successMessage}</Alert>}
 
       <fieldset disabled={fieldsDisabled} className="flex min-w-0 flex-col gap-5">
         <TextField

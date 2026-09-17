@@ -126,7 +126,7 @@ describe("AI generation", () => {
 
     expect(res.body.data).toMatchObject({
       operation: "GENERATE_POST",
-      promptVersion: "1.0.0",
+      promptVersion: "1.1.0",
       model: "gpt-5.6-terra-2026-08-01",
       brandProfileComplete: false,
       usage: { inputTokens: 1000, outputTokens: 500, estimatedCostUsd: EXPECTED_COST },
@@ -217,7 +217,7 @@ describe("AI generation", () => {
       operation: "HOOK",
       provider: "fake",
       model: "gpt-5.6-terra-2026-08-01",
-      promptVersion: "1.0.0",
+      promptVersion: "1.1.0",
       inputTokens: 1000,
       outputTokens: 500,
       cachedInputTokens: 200,

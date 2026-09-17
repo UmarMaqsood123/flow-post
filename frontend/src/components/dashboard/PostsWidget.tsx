@@ -1,4 +1,4 @@
-import { Clock, Heart, type LucideIcon, MessageCircle, Repeat2 } from "lucide-react";
+import { Clock, Heart, type LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { Link } from "react-router";
 import AsyncContent from "@/components/shared/AsyncContent";
@@ -8,7 +8,7 @@ import Badge from "@/components/ui/Badge";
 import Skeleton from "@/components/ui/Skeleton";
 import { optionLabel, SOCIAL_PLATFORM_OPTIONS } from "@/config/brandProfile";
 import { formatCompactNumber, formatDateTime, formatRelativeTime } from "@/lib/format";
-import type { DashboardPost } from "@/types/dashboard";
+import type { RecentPost, UpcomingPost } from "@/types/dashboard";
 import WidgetCard from "./WidgetCard";
 
 interface PostsWidgetProps {
@@ -16,7 +16,7 @@ interface PostsWidgetProps {
   description: string;
   icon: LucideIcon;
   variant: "upcoming" | "recent";
-  posts?: DashboardPost[];
+  posts?: (UpcomingPost | RecentPost)[];
   isLoading: boolean;
   /** Workspace time zone for scheduled times. */
   timeZone?: string;
@@ -93,29 +93,30 @@ function PostsWidget({
             <li key={post.id} className="flex gap-3 py-3">
               <PlatformBadge platform={post.platform} />
               <div className="min-w-0 flex-1">
-                <p className="line-clamp-2 text-sm">{post.caption}</p>
+                <p className="line-clamp-2 text-sm">{post.topic}</p>
                 <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted">
                   <span className="font-medium text-ink">
                     {optionLabel(SOCIAL_PLATFORM_OPTIONS, post.platform)}
                   </span>
-                  {variant === "upcoming" ? (
+                  {"scheduledAt" in post ? (
                     <span className="inline-flex items-center gap-1">
                       <Clock className="size-3.5" aria-hidden="true" />
-                      <time dateTime={post.date}>{formatDateTime(post.date, timeZone)}</time>
+                      <time dateTime={post.scheduledAt}>
+                        {formatDateTime(post.scheduledAt, timeZone)}
+                      </time>
                     </span>
                   ) : (
                     <>
-                      <time dateTime={post.date}>{formatRelativeTime(post.date)}</time>
-                      {post.metrics && (
-                        <>
-                          <Metric icon={Heart} value={post.metrics.likes} label="likes" />
-                          <Metric
-                            icon={MessageCircle}
-                            value={post.metrics.comments}
-                            label="comments"
-                          />
-                          <Metric icon={Repeat2} value={post.metrics.shares} label="shares" />
-                        </>
+                      {post.publishedAt && (
+                        <time dateTime={post.publishedAt}>
+                          {formatRelativeTime(post.publishedAt)}
+                        </time>
+                      )}
+                      {/* Null means no metrics collected yet, which isn't zero engagement. */}
+                      {post.engagement === null ? (
+                        <span>No metrics yet</span>
+                      ) : (
+                        <Metric icon={Heart} value={post.engagement} label="engagement" />
                       )}
                     </>
                   )}

@@ -28,6 +28,7 @@ AuthRouter.post(
   limit.loginByIp,
   validate({ body: loginSchema }),
   limit.loginByEmail,
+  limit.loginByAccount,
   AuthController.Login,
 );
 AuthRouter.post(

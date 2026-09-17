@@ -29,7 +29,7 @@ export const createUser = async (name: string, { verified = true } = {}): Promis
   return { id: res.body.data.user.id, name, email: credentials.email, token: accessToken, client };
 };
 
-type Method = "get" | "post" | "patch" | "delete";
+type Method = "get" | "post" | "put" | "patch" | "delete";
 
 /** Authenticated request as `user` (from that user's own IP). */
 export const call = (user: TestUser, method: Method, path: string, body?: object) => {

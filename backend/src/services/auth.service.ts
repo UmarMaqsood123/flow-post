@@ -1,8 +1,9 @@
 import type { Types } from "mongoose";
 import { env } from "../config/env";
 import { logger } from "../config/logger";
-import { RefreshTokenRevokeReason } from "../constants/auth.constant";
+import { RefreshTokenRevokeReason, UserStatus } from "../constants/auth.constant";
 import { ErrorCode, HttpStatus } from "../constants/http.constant";
+import { RefreshToken } from "../models/refreshToken.model";
 import { type PublicUser, toPublicUser, User, type UserDocument } from "../models/user.model";
 import { AppError } from "../utils/appError.util";
 import {
@@ -21,6 +22,7 @@ import type {
 } from "../validators/auth.validator";
 import * as EmailService from "./email.service";
 import * as TokenService from "./token.service";
+import { suspendedError } from "../middlewares/auth.middleware";
 
 const HOUR_MS = 60 * 60 * 1000;
 const MINUTE_MS = 60 * 1000;
@@ -99,6 +101,9 @@ export const loginUser = async (input: LoginInput, meta: RequestMeta): Promise<A
     throw invalidCredentials();
   }
 
+  // Checked after the password, so suspension isn't revealed to someone guessing.
+  if (user.status === UserStatus.SUSPENDED) throw suspendedError();
+
   // Transparently upgrade hashes created with older parameters.
   if (passwordNeedsRehash(user.passwordHash)) {
     user.passwordHash = await hashPassword(input.password);
@@ -117,11 +122,32 @@ export const refreshSession = async (
     throw AppError.unauthorized("No active session", ErrorCode.INVALID_TOKEN);
   }
 
+  // The session version before rotating. If "log out everywhere" or a password
+  // change lands between claiming the old token and issuing the new one, the new
+  // token escapes that revocation; comparing versions afterwards catches it.
+  const presented = await RefreshToken.findOne({ tokenHash: hashToken(rawToken) })
+    .select("user")
+    .lean();
+  const versionBefore = presented
+    ? (await User.findById(presented.user).select("tokenVersion").lean())?.tokenVersion
+    : undefined;
+
   const { userId, refreshToken } = await TokenService.rotateRefreshToken(rawToken, meta);
   const user = await User.findById(userId);
   if (!user) {
     await TokenService.revokeAllUserRefreshTokens(userId, RefreshTokenRevokeReason.USER_NOT_FOUND);
     throw AppError.unauthorized("No active session", ErrorCode.INVALID_TOKEN);
+  }
+  if (user.status === UserStatus.SUSPENDED) {
+    await TokenService.revokeAllUserRefreshTokens(userId, RefreshTokenRevokeReason.SUSPENDED);
+    throw suspendedError();
+  }
+  if (versionBefore !== undefined && user.tokenVersion !== versionBefore) {
+    await RefreshToken.updateOne(
+      { _id: refreshToken.id, revokedAt: null },
+      { $set: { revokedAt: new Date(), revokedReason: RefreshTokenRevokeReason.LOGOUT_ALL } },
+    );
+    throw AppError.unauthorized("Your session is no longer valid", ErrorCode.SESSION_REVOKED);
   }
 
   return { user: toPublicUser(user), ...buildAccessToken(user), refreshToken };
@@ -192,8 +218,15 @@ export const requestPasswordReset = async (email: string): Promise<void> => {
 };
 
 export const resetPassword = async ({ token, password }: ResetPasswordInput): Promise<void> => {
-  const passwordHash = await hashPassword(password);
   const now = new Date();
+  // Check the link first: hashing a password is deliberately expensive, and
+  // invalid links shouldn't cost that. The atomic update below still decides.
+  const valid = await User.exists({
+    passwordResetTokenHash: hashToken(token),
+    passwordResetExpiresAt: { $gt: now },
+  });
+  if (!valid) throw invalidLink("This password reset link is invalid or has expired");
+  const passwordHash = await hashPassword(password);
 
   // Atomically consume the token so it can only ever be used once.
   const user = await User.findOneAndUpdate(
@@ -235,14 +268,29 @@ export const changePassword = async (
     );
   }
 
-  user.passwordHash = await hashPassword(newPassword);
-  user.passwordChangedAt = new Date();
-  user.tokenVersion += 1;
-  await user.save();
+  // Atomic increment, so a concurrent "log out everywhere" isn't lost. Any
+  // outstanding reset link stops working too.
+  const updated = await User.findOneAndUpdate(
+    { _id: user._id },
+    {
+      $set: {
+        passwordHash: await hashPassword(newPassword),
+        passwordChangedAt: new Date(),
+        passwordResetTokenHash: null,
+        passwordResetExpiresAt: null,
+      },
+      $inc: { tokenVersion: 1 },
+    },
+    { returnDocument: "after" },
+  );
+  if (!updated) throw AppError.unauthorized();
 
   await TokenService.revokeAllUserRefreshTokens(user._id, RefreshTokenRevokeReason.PASSWORD_CHANGE);
-  EmailService.dispatchEmail(() => EmailService.sendPasswordChangedEmail(user), "password-changed");
+  EmailService.dispatchEmail(
+    () => EmailService.sendPasswordChangedEmail(updated),
+    "password-changed",
+  );
   logger.info({ userId: user.id }, "Password changed");
 
-  return createSession(user, meta);
+  return createSession(updated, meta);
 };

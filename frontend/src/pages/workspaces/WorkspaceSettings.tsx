@@ -1,17 +1,19 @@
+import { useState } from "react";
 import { useNavigate } from "react-router";
+import { ConfirmModal } from "@/components/modals";
 import SettingsCard from "@/components/shared/SettingsCard";
 import Alert from "@/components/ui/Alert";
 import Button from "@/components/ui/Button";
 import RoleBadge from "@/components/workspace/RoleBadge";
 import WorkspaceAvatar from "@/components/workspace/WorkspaceAvatar";
 import WorkspaceForm from "@/components/workspace/WorkspaceForm";
-import { getErrorMessage } from "@/lib/forms";
 import { hasMinimumRole } from "@/lib/workspaceRoles";
 import { paths } from "@/routing/paths";
 import type { Workspace } from "@/types/workspace";
 import useArchiveWorkspace from "@/services/workspace/useArchiveWorkspace";
 import useCurrentWorkspace from "@/services/workspace/useCurrentWorkspace";
 import useUpdateWorkspace from "@/services/workspace/useUpdateWorkspace";
+import { notify } from "@/lib/toast";
 
 const toFormValues = (workspace: Workspace) => ({
   name: workspace.name,
@@ -27,6 +29,7 @@ function WorkspaceSettings() {
   const updateWorkspace = useUpdateWorkspace();
   const archiveWorkspace = useArchiveWorkspace();
   const navigate = useNavigate();
+  const [isArchiveOpen, setIsArchiveOpen] = useState(false);
 
   // RequireWorkspace guarantees a current workspace; this narrows the type.
   if (!current) return null;
@@ -34,12 +37,8 @@ function WorkspaceSettings() {
   const canEdit = hasMinimumRole(role, "ADMIN");
 
   const handleArchive = () => {
-    const confirmed = window.confirm(
-      `Archive "${workspace.name}"? Members lose access and pending invitations are revoked until an owner restores it.`,
-    );
-    if (confirmed) {
-      archiveWorkspace.mutate(workspace.id, { onSuccess: () => navigate(paths.dashboard) });
-    }
+    archiveWorkspace.reset();
+    setIsArchiveOpen(true);
   };
 
   return (
@@ -83,11 +82,24 @@ function WorkspaceSettings() {
           <Button variant="danger" onClick={handleArchive} isLoading={archiveWorkspace.isPending}>
             Archive workspace
           </Button>
-          {archiveWorkspace.isError && (
-            <p role="alert" className="mt-3 text-sm text-red-700">
-              {getErrorMessage(archiveWorkspace.error)}
-            </p>
-          )}
+          <ConfirmModal
+            open={isArchiveOpen}
+            tone="danger"
+            title={`Archive "${workspace.name}"?`}
+            message="Members lose access and pending invitations are revoked until an owner restores it. Nothing is deleted."
+            confirmLabel="Archive workspace"
+            isLoading={archiveWorkspace.isPending}
+            error={archiveWorkspace.error}
+            onConfirm={() =>
+              archiveWorkspace.mutate(workspace.id, {
+                onSuccess: () => {
+                  notify.success(`${workspace.name} was archived.`);
+                  void navigate(paths.dashboard);
+                },
+              })
+            }
+            onClose={() => setIsArchiveOpen(false)}
+          />
         </SettingsCard>
       )}
     </div>

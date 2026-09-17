@@ -16,11 +16,14 @@ import type {
   PublishTextInput,
   SocialProfile,
 } from "../types";
+import { asBody } from "../http";
 
 /**
  * LinkedIn member profiles, using only self-serve products:
  * - "Sign In with LinkedIn using OpenID Connect" (`openid`, `profile`) for the connected profile.
- * - "Share on LinkedIn" (`w_member_social`) for text and single-image posts via the Posts API.
+ * - "Share on LinkedIn" (`w_member_social`) for text posts (Posts API) and single-image
+ *   posts. Images use the unversioned v2 Assets and UGC Posts APIs: the versioned
+ *   `/rest/assets` upload is partner-only and answers 403 for self-serve apps.
  *
  * Not supported, because they need LinkedIn approval or other products:
  * - Company pages (Community Management API: `w_organization_social`).
@@ -35,6 +38,7 @@ const AUTHORIZATION_URL = "https://www.linkedin.com/oauth/v2/authorization";
 const TOKEN_URL = "https://www.linkedin.com/oauth/v2/accessToken";
 const USERINFO_URL = "https://api.linkedin.com/v2/userinfo";
 const REST_API_URL = "https://api.linkedin.com/rest";
+const V2_API_URL = "https://api.linkedin.com/v2";
 
 export const LINKEDIN_SCOPES = ["openid", "profile", "w_member_social"];
 const POSTING_SCOPE = "w_member_social";
@@ -137,6 +141,15 @@ export class LinkedInProvider extends BaseSocialProvider {
     return { clientId, clientSecret };
   }
 
+  /** Unversioned v2 endpoints (image uploads and UGC posts) take no LinkedIn-Version header. */
+  private v2Headers(accessToken: string): Record<string, string> {
+    return {
+      Authorization: `Bearer ${accessToken}`,
+      "X-Restli-Protocol-Version": "2.0.0",
+      "Content-Type": "application/json",
+    };
+  }
+
   private restHeaders(accessToken: string, contentType?: string): Record<string, string> {
     return {
       Authorization: `Bearer ${accessToken}`,
@@ -173,6 +186,13 @@ export class LinkedInProvider extends BaseSocialProvider {
           );
     }
     if (context === "token-refresh") {
+      // Busy or throttled isn't a revoked login: keep the account connected and retry later.
+      if (status === 429 || status === 408) {
+        return new SocialProviderError("RATE_LIMITED", "LinkedIn is busy. Try again shortly.", {
+          platform: this.platform,
+          retryable: true,
+        });
+      }
       return serverError
         ? this.error("PROVIDER_ERROR", "LinkedIn couldn't refresh access. Please try again.", true)
         : this.error("REAUTH_REQUIRED", "LinkedIn access has expired. Reconnect your account.");
@@ -183,7 +203,9 @@ export class LinkedInProvider extends BaseSocialProvider {
     if (status === 403) {
       return this.error(
         "PERMISSION_DENIED",
-        "LinkedIn denied this action. Reconnect the account and approve posting permissions.",
+        detail
+          ? `LinkedIn denied this action: ${detail}`
+          : "LinkedIn denied this action. Reconnect the account and approve posting permissions.",
       );
     }
     if (status === 429) {
@@ -353,11 +375,18 @@ export class LinkedInProvider extends BaseSocialProvider {
     }
   }
 
-  private async createPost(
-    credentials: ProviderCredentials,
-    text: string,
-    media?: { id: string; altText?: string },
-  ): Promise<PublishResult> {
+  private published(postUrn: string): PublishResult {
+    if (!POST_URN.test(postUrn)) {
+      throw this.error("PROVIDER_ERROR", "LinkedIn didn't return the new post's id.");
+    }
+    return {
+      providerPostId: postUrn,
+      url: `https://www.linkedin.com/feed/update/${postUrn}/`,
+      publishedAt: this.now(),
+    };
+  }
+
+  private async createPost(credentials: ProviderCredentials, text: string): Promise<PublishResult> {
     const response = await this.send(
       `${REST_API_URL}/posts`,
       {
@@ -372,7 +401,6 @@ export class LinkedInProvider extends BaseSocialProvider {
             targetEntities: [],
             thirdPartyDistributionChannels: [],
           },
-          ...(media ? { content: { media } } : {}),
           lifecycleState: "PUBLISHED",
           isReshareDisabledByAuthor: false,
         }),
@@ -380,15 +408,7 @@ export class LinkedInProvider extends BaseSocialProvider {
       "api",
     );
 
-    const postUrn = response.headers.get("x-restli-id") ?? "";
-    if (!POST_URN.test(postUrn)) {
-      throw this.error("PROVIDER_ERROR", "LinkedIn didn't return the new post's id.");
-    }
-    return {
-      providerPostId: postUrn,
-      url: `https://www.linkedin.com/feed/update/${postUrn}/`,
-      publishedAt: this.now(),
-    };
+    return this.published(response.headers.get("x-restli-id") ?? "");
   }
 
   override async publishText(
@@ -420,10 +440,10 @@ export class LinkedInProvider extends BaseSocialProvider {
 
     // 1. Register a synchronous upload so the image is processed before the post uses it.
     const registration = await this.send(
-      `${REST_API_URL}/assets?action=registerUpload`,
+      `${V2_API_URL}/assets?action=registerUpload`,
       {
         method: "POST",
-        headers: this.restHeaders(credentials.accessToken, "application/json"),
+        headers: this.v2Headers(credentials.accessToken),
         body: JSON.stringify({
           registerUploadRequest: {
             owner: `urn:li:person:${credentials.providerAccountId}`,
@@ -451,16 +471,41 @@ export class LinkedInProvider extends BaseSocialProvider {
           Authorization: `Bearer ${credentials.accessToken}`,
           "Content-Type": image.mimeType,
         },
-        body: new Uint8Array(bytes),
+        body: asBody(bytes),
       },
       "api",
     );
 
-    // 3. Create the post. Asset ids are valid Images API URNs.
-    return this.createPost(credentials, text, {
-      id: `urn:li:image:${assetId}`,
-      ...(image.altText ? { altText: image.altText.slice(0, 4086) } : {}),
-    });
+    // 3. Create the post. UGC commentary is plain text, so nothing is escaped.
+    const response = await this.send(
+      `${V2_API_URL}/ugcPosts`,
+      {
+        method: "POST",
+        headers: this.v2Headers(credentials.accessToken),
+        body: JSON.stringify({
+          author: `urn:li:person:${credentials.providerAccountId}`,
+          lifecycleState: "PUBLISHED",
+          specificContent: {
+            "com.linkedin.ugc.ShareContent": {
+              shareCommentary: { text },
+              shareMediaCategory: "IMAGE",
+              media: [
+                {
+                  status: "READY",
+                  media: `urn:li:digitalmediaAsset:${assetId}`,
+                  ...(image.altText ? { description: { text: image.altText.slice(0, 4086) } } : {}),
+                },
+              ],
+            },
+          },
+          visibility: { "com.linkedin.ugc.MemberNetworkVisibility": "PUBLIC" },
+        }),
+      },
+      "api",
+    );
+    const body = await readJson(response);
+    const bodyId = isRecord(body) && typeof body.id === "string" ? body.id : "";
+    return this.published(response.headers.get("x-restli-id") ?? bodyId);
   }
 
   private parseUploadRegistration(data: unknown) {

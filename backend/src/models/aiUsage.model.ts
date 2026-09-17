@@ -56,6 +56,8 @@ const AIUsageSchema = new Schema<IAIUsage>(
 
 AIUsageSchema.index({ workspace: 1, createdAt: -1 });
 AIUsageSchema.index({ workspace: 1, user: 1, createdAt: -1 });
+// Platform-wide admin reports read by date across every workspace.
+AIUsageSchema.index({ createdAt: -1, operation: 1 });
 
 AIUsageSchema.plugin(workspaceScopedPlugin);
 

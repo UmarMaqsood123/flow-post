@@ -103,7 +103,7 @@ function AiRecommendationsWidget({
                     type="button"
                     aria-label={`Dismiss recommendation: ${recommendation.title}`}
                     onClick={() => setDismissed((ids) => [...ids, recommendation.id])}
-                    className="-mt-1 -mr-1 inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted hover:bg-slate-100 hover:text-ink"
+                    className="-mt-1 -mr-1 inline-flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted hover:bg-slate-100 hover:text-ink"
                   >
                     <X className="size-4" aria-hidden="true" />
                   </button>

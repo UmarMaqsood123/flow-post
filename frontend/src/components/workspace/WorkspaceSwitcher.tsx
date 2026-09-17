@@ -3,15 +3,15 @@ import { useCallback, useRef, useState } from "react";
 import { Link } from "react-router";
 import { ROLE_LABELS } from "@/config/workspace";
 import useDismiss from "@/hooks/useDismiss";
-import { getErrorMessage } from "@/lib/forms";
 import { cn } from "@/lib/utils";
 import { paths } from "@/routing/paths";
 import useCurrentWorkspace from "@/services/workspace/useCurrentWorkspace";
 import useSwitchWorkspace from "@/services/workspace/useSwitchWorkspace";
 import WorkspaceAvatar from "./WorkspaceAvatar";
+import { notify } from "@/lib/toast";
 
 const menuItemClass =
-  "flex w-full items-center gap-2.5 rounded-md px-2 py-2 text-left text-sm hover:bg-slate-50";
+  "flex w-full cursor-pointer items-center gap-2.5 rounded-md px-2 py-2 text-left text-sm hover:bg-slate-50";
 
 interface WorkspaceSwitcherProps {
   /** Stretch to the container width (sidebar) instead of a compact header button. */
@@ -51,7 +51,7 @@ function WorkspaceSwitcher({ fullWidth = false }: WorkspaceSwitcherProps) {
             : "Choose a workspace"
         }
         className={cn(
-          "flex items-center gap-2 rounded-md border border-line bg-surface text-left text-sm hover:bg-slate-50",
+          "flex cursor-pointer items-center gap-2 rounded-md border border-line bg-surface text-left text-sm hover:bg-slate-50",
           fullWidth ? "w-full px-2.5 py-2" : "max-w-40 px-2 py-1.5 sm:max-w-60",
         )}
       >
@@ -94,7 +94,12 @@ function WorkspaceSwitcher({ fullWidth = false }: WorkspaceSwitcherProps) {
                     aria-current={isCurrent ? "true" : undefined}
                     disabled={switchWorkspace.isPending}
                     onClick={() => {
-                      if (!isCurrent) switchWorkspace.mutate(workspace.id);
+                      if (!isCurrent) {
+                        // The menu closes straight away, so failures are reported as a toast.
+                        switchWorkspace.mutate(workspace.id, {
+                          onError: (error) => notify.error(error, "We couldn't switch workspaces."),
+                        });
+                      }
                       close();
                     }}
                     className={menuItemClass}
@@ -117,12 +122,6 @@ function WorkspaceSwitcher({ fullWidth = false }: WorkspaceSwitcherProps) {
               </li>
             )}
           </ul>
-
-          {switchWorkspace.error && (
-            <p role="alert" className="px-2 py-1.5 text-xs text-red-700">
-              {getErrorMessage(switchWorkspace.error)}
-            </p>
-          )}
 
           <div className="mt-1 border-t border-line pt-1">
             {current && (

@@ -1,27 +1,22 @@
-import { Download, FileText, Play, Trash2 } from "lucide-react";
+import { Download, FileText, Play, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { useSearchParams } from "react-router";
 import PageHeader from "@/components/shared/PageHeader";
 import PageLoader from "@/components/shared/PageLoader";
 import Alert from "@/components/ui/Alert";
 import Button from "@/components/ui/Button";
-import Dropzone from "@/components/ui/Dropzone";
-import {
-  ANY_FILE_ACCEPT,
-  MAX_FILES_PER_UPLOAD,
-  MAX_UPLOAD_SIZE_MB,
-  MAX_VIDEO_SIZE_MB,
-} from "@/config/uploads";
-import { formatFileSize, validateClientFile } from "@/lib/files";
+import UploadMediaModal from "@/components/media/UploadMediaModal";
+import { DeleteModal } from "@/components/modals";
+import { formatFileSize } from "@/lib/files";
 import { getErrorMessage } from "@/lib/forms";
 import { cn } from "@/lib/utils";
 import { hasMinimumRole } from "@/lib/workspaceRoles";
 import useSession from "@/services/auth/useSession";
 import useDeleteFile from "@/services/storage/useDeleteFile";
-import useUploadFiles from "@/services/storage/useUploadFiles";
 import useWorkspaceFiles from "@/services/storage/useWorkspaceFiles";
 import useCurrentWorkspace from "@/services/workspace/useCurrentWorkspace";
 import type { FileKind, UploadedFile } from "@/types/file";
+import { notify } from "@/lib/toast";
 
 const FILTERS: { id: FileKind | "all"; label: string }[] = [
   { id: "all", label: "All files" },
@@ -90,7 +85,11 @@ function FileCard({ file, canDelete, isDeleting, onDelete }: FileCardProps) {
           <p className="truncate text-sm font-medium" title={file.name}>
             {file.name}
           </p>
-          <p className="text-xs text-muted">
+          {file.description && (
+            <p className="mt-0.5 line-clamp-2 text-xs text-ink/80">{file.description}</p>
+          )}
+          <p className="mt-0.5 truncate text-xs text-muted" title={file.fileName}>
+            {file.name !== file.fileName && `${file.fileName} · `}
             {formatFileSize(file.size)} · {new Date(file.createdAt).toLocaleDateString()}
           </p>
         </div>
@@ -131,10 +130,9 @@ function WorkspaceFiles() {
 
   const workspaceId = current?.workspace.id;
   const files = useWorkspaceFiles(workspaceId, kind);
-  const uploadFiles = useUploadFiles(workspaceId);
   const deleteFile = useDeleteFile(workspaceId ?? "");
-  const [uploadError, setUploadError] = useState<string | null>(null);
-  const [uploadedCount, setUploadedCount] = useState<number | null>(null);
+  const [isUploadOpen, setIsUploadOpen] = useState(false);
+  const [fileToDelete, setFileToDelete] = useState<UploadedFile | null>(null);
 
   // RequireWorkspace guarantees a current workspace; this narrows the type.
   if (!current || !workspaceId) return null;
@@ -142,32 +140,20 @@ function WorkspaceFiles() {
   const canUpload = hasMinimumRole(current.role, "EDITOR");
   const isAdmin = hasMinimumRole(current.role, "ADMIN");
 
-  const handleFiles = async (selected: File[]) => {
-    setUploadError(null);
-    setUploadedCount(null);
-    if (selected.length > MAX_FILES_PER_UPLOAD) {
-      setUploadError(`You can upload up to ${MAX_FILES_PER_UPLOAD} files at once.`);
-      return;
-    }
-    for (const file of selected) {
-      const problem = validateClientFile(file);
-      if (problem) {
-        setUploadError(`${file.name}: ${problem}`);
-        return;
-      }
-    }
-    try {
-      const uploaded = await uploadFiles.upload(selected);
-      setUploadedCount(uploaded.length);
-    } catch (error) {
-      setUploadError(getErrorMessage(error, "Upload failed. Please try again."));
-    }
+  const handleDelete = (file: UploadedFile) => {
+    deleteFile.reset();
+    setFileToDelete(file);
   };
 
-  const handleDelete = (file: UploadedFile) => {
-    if (window.confirm(`Delete "${file.name}"? This can't be undone.`)) {
-      deleteFile.mutate(file.id);
-    }
+  const confirmDelete = () => {
+    if (!fileToDelete) return;
+    const name = fileToDelete.name;
+    deleteFile.mutate(fileToDelete.id, {
+      onSuccess: () => {
+        setFileToDelete(null);
+        notify.success(`"${name}" deleted.`);
+      },
+    });
   };
 
   return (
@@ -175,45 +161,28 @@ function WorkspaceFiles() {
       <PageHeader
         title="Media"
         description={`Images, videos and documents for ${current.workspace.name}.`}
+        actions={
+          canUpload && (
+            <Button onClick={() => setIsUploadOpen(true)}>
+              <Plus className="size-4" aria-hidden="true" />
+              Add media
+            </Button>
+          )
+        }
       />
 
-      {canUpload ? (
-        <section aria-label="Upload files" className="flex flex-col gap-3">
-          <Dropzone
-            multiple
-            accept={ANY_FILE_ACCEPT}
-            disabled={uploadFiles.isUploading}
-            ariaLabel="Upload images, videos or documents"
-            hint={`Images, videos, PDF, Word, Excel, PowerPoint, TXT or CSV · up to ${MAX_UPLOAD_SIZE_MB} MB each (videos ${MAX_VIDEO_SIZE_MB} MB), ${MAX_FILES_PER_UPLOAD} at a time`}
-            invalid={Boolean(uploadError)}
-            onFiles={(selected) => void handleFiles(selected)}
-          />
-          {uploadFiles.isUploading && uploadFiles.progress !== null && (
-            <div className="flex items-center gap-3">
-              <div
-                className="h-1.5 flex-1 overflow-hidden rounded-full bg-slate-100"
-                role="progressbar"
-                aria-label="Uploading files"
-                aria-valuemin={0}
-                aria-valuemax={100}
-                aria-valuenow={uploadFiles.progress}
-              >
-                <div
-                  className="h-full rounded-full bg-primary transition-[width] duration-200"
-                  style={{ width: `${uploadFiles.progress}%` }}
-                />
-              </div>
-              <span className="text-xs text-muted">{uploadFiles.progress}%</span>
-            </div>
-          )}
-          {uploadError && <Alert variant="error">{uploadError}</Alert>}
-          {uploadedCount !== null && (
-            <Alert variant="success">
-              {uploadedCount} {uploadedCount === 1 ? "file" : "files"} uploaded.
-            </Alert>
-          )}
-        </section>
-      ) : (
+      {canUpload && (
+        <UploadMediaModal
+          open={isUploadOpen}
+          workspaceId={workspaceId}
+          onClose={() => setIsUploadOpen(false)}
+          onUploaded={(count) =>
+            notify.success(`${count} ${count === 1 ? "file" : "files"} uploaded.`)
+          }
+        />
+      )}
+
+      {!canUpload && (
         <Alert variant="info">Viewers can browse files. Editors and above can upload.</Alert>
       )}
 
@@ -228,7 +197,7 @@ function WorkspaceFiles() {
               aria-selected={selected}
               onClick={() => setSearchParams(filter.id === "all" ? {} : { kind: filter.id })}
               className={cn(
-                "-mb-px border-b-2 px-3 py-2.5 text-sm font-medium transition-colors",
+                "-mb-px cursor-pointer border-b-2 px-3 py-2.5 text-sm font-medium transition-colors",
                 selected
                   ? "border-primary text-primary"
                   : "border-transparent text-muted hover:text-ink",
@@ -240,7 +209,15 @@ function WorkspaceFiles() {
         })}
       </div>
 
-      {deleteFile.isError && <Alert variant="error">{getErrorMessage(deleteFile.error)}</Alert>}
+      <DeleteModal
+        open={fileToDelete !== null}
+        itemName={fileToDelete ? `"${fileToDelete.name}"` : "this file"}
+        description="Posts that use it will need another file attached before they can publish."
+        isDeleting={deleteFile.isPending}
+        error={deleteFile.error}
+        onConfirm={confirmDelete}
+        onClose={() => setFileToDelete(null)}
+      />
 
       {files.isPending && <PageLoader label="Loading files…" />}
       {files.isError && <Alert variant="error">{getErrorMessage(files.error)}</Alert>}

@@ -29,7 +29,7 @@ function IconButton({
       title={label}
       onClick={onClick}
       disabled={disabled}
-      className="rounded-md p-1.5 text-muted transition-colors hover:bg-slate-100 hover:text-ink disabled:pointer-events-none disabled:opacity-40 [&_svg]:size-4"
+      className="cursor-pointer rounded-md p-1.5 text-muted transition-colors hover:bg-slate-100 hover:text-ink disabled:pointer-events-none disabled:opacity-40 [&_svg]:size-4"
     >
       {children}
     </button>

@@ -36,6 +36,8 @@ export interface ISocialAccount {
   connectedBy: Types.ObjectId;
   lastConnectedAt: Date;
   lastRefreshedAt: Date | null;
+  /** Lease held while one process refreshes tokens, so rotating refresh tokens aren't spent twice. */
+  refreshLockedUntil: Date | null;
   /** Last successful connection test. */
   lastCheckedAt: Date | null;
   disconnectedAt: Date | null;
@@ -77,6 +79,7 @@ const SocialAccountSchema = new Schema<ISocialAccount>(
     connectedBy: { type: Schema.Types.ObjectId, ref: "User", required: true },
     lastConnectedAt: { type: Date, required: true },
     lastRefreshedAt: { type: Date, default: null },
+    refreshLockedUntil: { type: Date, default: null },
     lastCheckedAt: { type: Date, default: null },
     disconnectedAt: { type: Date, default: null },
     lastError: { type: SocialAccountErrorSchema, default: null },

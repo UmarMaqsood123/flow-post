@@ -2,13 +2,17 @@ import { logger } from "../config/logger";
 
 type CleanupFn = () => Promise<void>;
 
-const SHUTDOWN_TIMEOUT_MS = 15_000;
+const DEFAULT_SHUTDOWN_TIMEOUT_MS = 15_000;
 
 /**
  * Runs `cleanup` once on SIGINT/SIGTERM or a fatal process error, then exits.
  * A hard timeout guarantees the process exits even if cleanup hangs.
  */
-export const registerGracefulShutdown = (processName: string, cleanup: CleanupFn): void => {
+export const registerGracefulShutdown = (
+  processName: string,
+  cleanup: CleanupFn,
+  { timeoutMs = DEFAULT_SHUTDOWN_TIMEOUT_MS }: { timeoutMs?: number } = {},
+): void => {
   let shuttingDown = false;
 
   const shutdown = async (reason: string, exitCode: number) => {
@@ -20,7 +24,7 @@ export const registerGracefulShutdown = (processName: string, cleanup: CleanupFn
     const forceExit = setTimeout(() => {
       logger.error("Graceful shutdown timed out, forcing exit");
       process.exit(1);
-    }, SHUTDOWN_TIMEOUT_MS);
+    }, timeoutMs);
     forceExit.unref();
 
     try {

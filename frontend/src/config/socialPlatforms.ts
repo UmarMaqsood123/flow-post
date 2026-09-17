@@ -30,28 +30,62 @@ export const PLATFORM_DETAILS: Record<ConnectablePlatform, PlatformDetails> = {
       "LinkedIn keeps FlowPost listed as a permitted app until you remove it in LinkedIn's Settings → Data privacy → Permitted services, or the access expires.",
   },
   FACEBOOK: {
-    implemented: false,
-    description: "Publish to Facebook Pages you manage.",
-    supported: [],
-    unsupported: [],
+    implemented: true,
+    description: "Publish to a Facebook Page you manage.",
+    supported: [
+      "Text posts",
+      "Posts with one or several photos",
+      "Videos and Reels",
+      "Deleting posts FlowPost published",
+    ],
+    unsupported: ["Personal profiles and groups", "Custom link previews", "Post analytics"],
+    setupHint:
+      "Facebook isn't configured on this server yet. An administrator needs to add the Meta app credentials.",
+    revokeHint:
+      "Facebook keeps FlowPost listed until you remove it in Settings → Business integrations, or the access is invalidated.",
   },
   INSTAGRAM: {
-    implemented: false,
-    description: "Publish to Instagram professional accounts.",
-    supported: [],
-    unsupported: [],
+    implemented: true,
+    description: "Publish to an Instagram professional account linked to a Facebook Page.",
+    supported: ["Photo posts", "Carousels of up to 10 items", "Reels"],
+    unsupported: [
+      "Text-only posts — Instagram needs an image or video",
+      "Personal accounts, and scheduling without media",
+      "Stories, and deleting published posts",
+    ],
+    setupHint:
+      "Instagram isn't configured on this server yet. An administrator needs to add the Meta app credentials.",
+    revokeHint:
+      "Access comes from the linked Facebook Page. Remove FlowPost in Facebook's Settings → Business integrations to revoke it.",
   },
   TIKTOK: {
-    implemented: false,
-    description: "Publish videos and photo posts to TikTok.",
-    supported: [],
-    unsupported: [],
+    implemented: true,
+    description: "Publish videos to your TikTok account.",
+    supported: ["Videos up to 10 minutes"],
+    unsupported: [
+      "Text-only posts",
+      "Photo posts \u2014 they need a verified media domain",
+      "Deleting posts",
+      "Public posts until TikTok audits the app",
+    ],
+    setupHint:
+      "TikTok isn't configured on this server yet. An administrator needs to add the TikTok app credentials.",
+    revokeHint:
+      "Remove FlowPost under TikTok's Settings \u2192 Security and permissions \u2192 Manage app permissions to revoke access.",
   },
   YOUTUBE: {
-    implemented: false,
+    implemented: true,
     description: "Upload videos and Shorts to your YouTube channel.",
-    supported: [],
-    unsupported: [],
+    supported: ["Videos", "Shorts (vertical, three minutes or less)"],
+    unsupported: [
+      "Text-only posts and images",
+      "Deleting videos",
+      "Public videos until YouTube audits the app",
+    ],
+    setupHint:
+      "YouTube isn't configured on this server yet. An administrator needs to add the Google OAuth credentials.",
+    revokeHint:
+      "Remove FlowPost at myaccount.google.com \u2192 Security \u2192 Third-party apps with account access.",
   },
 };
 

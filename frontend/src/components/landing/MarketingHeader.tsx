@@ -78,7 +78,7 @@ function MarketingHeader() {
           aria-expanded={menuOpen}
           aria-controls="mobile-menu"
           aria-label={menuOpen ? "Close menu" : "Open menu"}
-          className="inline-flex size-10 items-center justify-center rounded-md text-ink hover:bg-slate-100 md:hidden"
+          className="inline-flex size-10 cursor-pointer items-center justify-center rounded-md text-ink hover:bg-slate-100 md:hidden"
         >
           {menuOpen ? <X className="size-5" /> : <Menu className="size-5" />}
         </button>

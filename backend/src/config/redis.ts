@@ -23,8 +23,16 @@ export const createRedisConnection = (name: string, options: RedisOptions = {}):
   return client;
 };
 
-/** Shared general-purpose client (cache, rate limiting, queue producers). */
-export const redis = createRedisConnection("flowpost:main", { lazyConnect: true });
+/**
+ * Shared general-purpose client (rate limiting, queue producers). Unlike worker
+ * connections it fails fast while Redis is unreachable: requests get an error
+ * instead of hanging on an offline queue that retries forever.
+ */
+export const redis = createRedisConnection("flowpost:main", {
+  lazyConnect: true,
+  maxRetriesPerRequest: 2,
+  enableOfflineQueue: false,
+});
 
 export const connectRedis = async (): Promise<void> => {
   if (redis.status === "wait") {

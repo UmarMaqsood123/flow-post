@@ -13,6 +13,11 @@ export interface IWorkspace {
   description: string | null;
   /** IANA time zone used for scheduling, e.g. "America/New_York". */
   timezone: string;
+  /**
+   * Whose subscription covers this workspace. Starts as the creator and moves to
+   * another owner if the billing owner stops being one.
+   */
+  billingOwner: Types.ObjectId | null;
   createdBy: Types.ObjectId;
   status: WorkspaceStatusValue;
   archivedAt: Date | null;
@@ -31,6 +36,7 @@ const WorkspaceSchema = new Schema<IWorkspace>(
     industry: { type: String, enum: [...WORKSPACE_INDUSTRIES, null], default: null },
     description: { type: String, default: null, maxlength: 500 },
     timezone: { type: String, required: true, default: "UTC" },
+    billingOwner: { type: Schema.Types.ObjectId, ref: "User", default: null, index: true },
     createdBy: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
     status: {
       type: String,
@@ -42,6 +48,9 @@ const WorkspaceSchema = new Schema<IWorkspace>(
   },
   { timestamps: true },
 );
+
+// Admin lists and the active-workspace checks in background sweeps.
+WorkspaceSchema.index({ status: 1, createdAt: -1 });
 
 export const Workspace: Model<IWorkspace> = mongoose.model<IWorkspace>(
   "Workspace",

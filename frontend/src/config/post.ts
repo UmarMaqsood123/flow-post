@@ -9,7 +9,13 @@ import {
   Smile,
   Zap,
 } from "lucide-react";
-import type { CreatePlatform, PostField, PostStatus, RefineAction } from "@/types/post";
+import type {
+  CreatePlatform,
+  ManualPostStatus,
+  PostField,
+  PostStatus,
+  RefineAction,
+} from "@/types/post";
 import type { ChoiceOption } from "./brandProfile";
 
 /** Mirrors backend/src/constants/post.constant.ts. */
@@ -23,18 +29,18 @@ export const CREATE_PLATFORM_OPTIONS: ChoiceOption<CreatePlatform>[] = [
   {
     value: "INSTAGRAM",
     label: "Instagram",
-    description: "Caption, hashtags and a carousel or reel idea",
+    description: "Caption and hashtags, with an image, carousel or reel",
   },
   { value: "FACEBOOK", label: "Facebook", description: "Conversational post that invites replies" },
   {
     value: "TIKTOK",
     label: "TikTok",
-    description: "Hook, short-video script, caption and hashtags",
+    description: "Hook, caption and hashtags for your video",
   },
   {
     value: "YOUTUBE",
     label: "YouTube Shorts",
-    description: "Title, hook, script, description and hashtags",
+    description: "Title, hook, description and hashtags",
   },
 ];
 
@@ -44,10 +50,10 @@ export const platformLabel = (platform: CreatePlatform) =>
 /** Which fields each platform uses, in editing order. */
 export const PLATFORM_FIELDS: Record<CreatePlatform, PostField[]> = {
   LINKEDIN: ["hook", "body", "cta", "text", "hashtags"],
-  INSTAGRAM: ["text", "hashtags", "visualIdea"],
+  INSTAGRAM: ["text", "hashtags"],
   FACEBOOK: ["text", "hashtags"],
-  TIKTOK: ["hook", "script", "visualIdea", "text", "hashtags"],
-  YOUTUBE: ["title", "hook", "script", "text", "hashtags"],
+  TIKTOK: ["hook", "text", "hashtags"],
+  YOUTUBE: ["title", "hook", "text", "hashtags"],
 };
 
 /** What the main `text` field is called on each platform. */
@@ -73,8 +79,6 @@ export const FIELD_LABELS: Record<Exclude<PostField, "text">, string> = {
   hook: "Hook",
   body: "Body",
   cta: "Call to action",
-  script: "Script",
-  visualIdea: "Visual idea",
   hashtags: "Hashtags",
 };
 
@@ -96,24 +100,43 @@ export const REFINE_ACTIONS: {
 
 export const POST_STATUS_DETAILS: Record<
   PostStatus,
-  { label: string; tone: "primary" | "success" | "neutral" }
+  {
+    label: string;
+    tone: "primary" | "success" | "neutral" | "warning" | "danger";
+    /** Calendar card accent. */
+    dot: string;
+  }
 > = {
-  DRAFT: { label: "Draft", tone: "primary" },
-  READY: { label: "Ready", tone: "success" },
-  ARCHIVED: { label: "Archived", tone: "neutral" },
+  IDEA: { label: "Idea", tone: "neutral", dot: "bg-slate-400" },
+  DRAFT: { label: "Draft", tone: "primary", dot: "bg-primary" },
+  READY: { label: "Ready", tone: "warning", dot: "bg-amber-500" },
+  APPROVED: { label: "Approved", tone: "success", dot: "bg-green-600" },
+  SCHEDULED: { label: "Scheduled", tone: "primary", dot: "bg-indigo-500" },
+  PUBLISHING: { label: "Publishing", tone: "warning", dot: "bg-amber-600" },
+  PUBLISHED: { label: "Published", tone: "success", dot: "bg-emerald-600" },
+  FAILED: { label: "Failed", tone: "danger", dot: "bg-red-600" },
 };
+
+/** Statuses a person can set directly, in workflow order. */
+export const MANUAL_POST_STATUSES: ManualPostStatus[] = ["IDEA", "DRAFT", "READY", "APPROVED"];
+
+export const POST_STATUS_OPTIONS = (Object.keys(POST_STATUS_DETAILS) as PostStatus[]).map(
+  (status) => ({ value: status, label: POST_STATUS_DETAILS[status].label }),
+);
+
+/** Published posts (and ones mid-publish) can't be changed. */
+export const isPostLocked = (status: PostStatus) =>
+  status === "PUBLISHING" || status === "PUBLISHED";
 
 export const POST_LIMITS = {
   topic: 500,
   instructions: 1000,
+  pillar: 120,
   title: 200,
   hook: 500,
   body: 6000,
   text: 10_000,
   cta: 300,
-  visualIdea: 2000,
-  scriptLine: 600,
-  scenes: 12,
   hashtag: 60,
   hashtags: 30,
 } as const;

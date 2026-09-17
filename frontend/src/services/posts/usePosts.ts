@@ -1,13 +1,16 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { queryKeys } from "@/lib/queryKeys";
 import type {
+  CalendarQuery,
   GeneratePostsPayload,
   ListPostsQuery,
   Post,
   PostStatus,
   RefinePostPayload,
   RegeneratePostPayload,
+  SchedulePostInput,
   UpdatePostContentPayload,
+  UpdatePostDetailsPayload,
 } from "@/types/post";
 import { postsApi } from "./postsApi";
 
@@ -28,10 +31,26 @@ export function usePost(workspaceId: string | undefined, postId: string | undefi
   });
 }
 
+/** The calendar for a range of instants, with the unscheduled backlog. */
+export function useCalendar(workspaceId: string | undefined, query: CalendarQuery | null) {
+  return useQuery({
+    queryKey: queryKeys.workspaces.calendar(workspaceId ?? "", query ?? {}),
+    queryFn: () => postsApi.calendar(workspaceId ?? "", query as CalendarQuery),
+    enabled: Boolean(workspaceId && query),
+    placeholderData: (previous) => previous,
+  });
+}
+
 function usePostCache(workspaceId: string) {
   const queryClient = useQueryClient();
-  const refreshLists = () =>
-    queryClient.invalidateQueries({ queryKey: queryKeys.workspaces.postLists(workspaceId) });
+  const refreshLists = () => {
+    void queryClient.invalidateQueries({
+      queryKey: queryKeys.workspaces.calendars(workspaceId),
+    });
+    return queryClient.invalidateQueries({
+      queryKey: queryKeys.workspaces.postLists(workspaceId),
+    });
+  };
   return {
     refreshLists,
     /** Keeps the open post in step with the server, including its new version. */
@@ -97,6 +116,50 @@ export function useSetPostStatus(workspaceId: string) {
   return useMutation({
     mutationFn: ({ postId, status }: { postId: string; status: PostStatus }) =>
       postsApi.setStatus(workspaceId, postId, status),
+    onSuccess: (post) => cache.store(post),
+  });
+}
+
+export function useDuplicatePost(workspaceId: string) {
+  const cache = usePostCache(workspaceId);
+  return useMutation({
+    mutationFn: (postId: string) => postsApi.duplicate(workspaceId, postId),
+    onSuccess: () => void cache.refreshLists(),
+  });
+}
+
+/** Schedule, reschedule (new time) or unschedule (null). */
+export function useSchedulePost(workspaceId: string) {
+  const cache = usePostCache(workspaceId);
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ postId, ...input }: SchedulePostInput & { postId: string }) =>
+      postsApi.schedule(workspaceId, postId, input),
+    onSuccess: (post) => {
+      cache.store(post);
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.workspaces.postSchedule(workspaceId, post.id),
+      });
+    },
+  });
+}
+
+/** The publishing schedule and its attempt history, polled while a publish is in flight. */
+export function usePostSchedule(workspaceId: string | undefined, postId: string | undefined) {
+  return useQuery({
+    queryKey: queryKeys.workspaces.postSchedule(workspaceId ?? "", postId ?? ""),
+    queryFn: () => postsApi.scheduleHistory(workspaceId ?? "", postId ?? ""),
+    enabled: Boolean(workspaceId && postId),
+    refetchInterval: (query) =>
+      query.state.data?.schedule?.status === "PROCESSING" ? 5_000 : false,
+  });
+}
+
+export function useUpdatePostDetails(workspaceId: string) {
+  const cache = usePostCache(workspaceId);
+  return useMutation({
+    mutationFn: ({ postId, payload }: { postId: string; payload: UpdatePostDetailsPayload }) =>
+      postsApi.updateDetails(workspaceId, postId, payload),
     onSuccess: (post) => cache.store(post),
   });
 }

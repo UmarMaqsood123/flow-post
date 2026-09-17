@@ -52,6 +52,10 @@ export const contentStrategyApi = {
       )
     ).data.strategy,
 
+  remove: async (workspaceId: string, strategyId: string) => {
+    await api.delete<null>(strategyPath(workspaceId, strategyId));
+  },
+
   activate: async (workspaceId: string, strategyId: string) =>
     (await api.post<StrategyResponse>(`${strategyPath(workspaceId, strategyId)}/activate`)).data
       .strategy,

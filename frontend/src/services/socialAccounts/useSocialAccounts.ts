@@ -33,6 +33,33 @@ export function useConnectSocialAccount() {
   });
 }
 
+/** The accounts a pending authorization could connect. */
+export function useConnectionChoices(workspaceId: string | undefined, draftId: string | null) {
+  return useQuery({
+    queryKey: queryKeys.workspaces.connectionChoices(workspaceId ?? "", draftId ?? ""),
+    queryFn: () =>
+      socialAccountsApi.listConnectionChoices({
+        draftId: draftId ?? "",
+        workspaceId: workspaceId ?? "",
+      }),
+    enabled: Boolean(workspaceId && draftId),
+    // The draft expires, so a stale list would only offer dead choices.
+    staleTime: 0,
+    retry: false,
+  });
+}
+
+export function useChooseConnectionTarget(workspaceId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: socialAccountsApi.chooseConnectionTarget,
+    onSuccess: () =>
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.workspaces.socialAccounts(workspaceId),
+      }),
+  });
+}
+
 export function useDisconnectSocialAccount(workspaceId: string) {
   const queryClient = useQueryClient();
   return useMutation({

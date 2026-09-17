@@ -1,10 +1,18 @@
 import type { RequestHandler } from "express";
 import { isValidObjectId } from "mongoose";
-import { CSRF_HEADER, CSRF_HEADER_VALUE } from "../constants/auth.constant";
+import { CSRF_HEADER, CSRF_HEADER_VALUE, UserRole, UserStatus } from "../constants/auth.constant";
 import { ErrorCode } from "../constants/http.constant";
 import { User } from "../models/user.model";
 import { AppError } from "../utils/appError.util";
 import { verifyAccessToken } from "../utils/token.util";
+
+const ACTIVITY_WRITE_INTERVAL_MS = 5 * 60_000;
+
+export const suspendedError = () =>
+  AppError.forbidden(
+    "This account has been suspended. Contact support if you think this is a mistake.",
+    ErrorCode.ACCOUNT_SUSPENDED,
+  );
 
 const extractBearerToken = (header: string | undefined): string | undefined => {
   if (!header) return undefined;
@@ -31,7 +39,24 @@ export const authenticate: RequestHandler = async (req, _res, next) => {
     throw AppError.unauthorized("Your session is no longer valid", ErrorCode.SESSION_REVOKED);
   }
 
+  if (user.status === UserStatus.SUSPENDED) throw suspendedError();
+
+  // Feeds the "active users" count; written at most every few minutes per user.
+  const now = Date.now();
+  if (!user.lastActiveAt || now - user.lastActiveAt.getTime() > ACTIVITY_WRITE_INTERVAL_MS) {
+    user.lastActiveAt = new Date(now);
+    await User.updateOne({ _id: user._id }, { $set: { lastActiveAt: user.lastActiveAt } });
+  }
+
   req.user = user;
+  next();
+};
+
+/** Only SUPER_ADMIN, re-read from the database on every request by `authenticate`. */
+export const requireSuperAdmin: RequestHandler = (req, _res, next) => {
+  if (!req.user) throw AppError.unauthorized();
+  // Not found rather than forbidden, so the admin API doesn't advertise itself.
+  if (req.user.role !== UserRole.SUPER_ADMIN) throw AppError.notFound("Not found");
   next();
 };
 

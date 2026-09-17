@@ -7,6 +7,7 @@ import {
   SocialProviderRegistry,
 } from "../src/integrations/social/registry";
 import { SocialAccount } from "../src/models/socialAccount.model";
+import { SocialConnectionDraft } from "../src/models/socialConnectionDraft.model";
 import { SocialOAuthState } from "../src/models/socialOAuthState.model";
 import { User } from "../src/models/user.model";
 import { Workspace } from "../src/models/workspace.model";
@@ -444,6 +445,8 @@ describe("Social account permissions and isolation", () => {
     await startConnection(editor, workspace.id).expect(403);
     await call(viewer, "post", `/social-accounts/${account.id}/test`).expect(403);
     await call(viewer, "post", `/social-accounts/${account.id}/posts`, { text: "Hi" }).expect(403);
+    // Direct publishing skips approval, so editors can't use it.
+    await call(editor, "post", `/social-accounts/${account.id}/posts`, { text: "Hi" }).expect(403);
     await call(editor, "delete", `/social-accounts/${account.id}`).expect(403);
 
     await call(editor, "post", `/social-accounts/${account.id}/test`).expect(200);
@@ -779,5 +782,117 @@ describe("Token lifecycle", () => {
       lastError: { code: "TOKEN_DECRYPTION_FAILED" },
     });
     expect(provider.countCalls("publishText")).toBe(0);
+  });
+});
+
+describe("Choosing which account to connect", () => {
+  const TARGETS = [
+    { id: "page-1", name: "Acme Coffee", username: "acmecoffee", image: null, description: "Cafe" },
+    { id: "page-2", name: "Acme Roastery", username: null, image: null, description: null },
+  ];
+
+  /** Runs OAuth to the point where the user has to choose a Page. */
+  const startChoice = async (user: TestUser, workspaceId: string) => {
+    provider.offerTargets(TARGETS);
+    const start = await startConnection(user, workspaceId).expect(200);
+    const approval = provider.approve(start.body.data.authorizationUrl);
+    const res = await sendCallback(user, approval, bindingCookie(start));
+    return redirectResult(res);
+  };
+
+  it("asks which account to connect instead of guessing", async () => {
+    const { owner, workspace } = await setup();
+
+    const result = await startChoice(owner, workspace.id);
+
+    expect(result.connected).toBeUndefined();
+    expect(result.workspaceId).toBe(workspace.id);
+    expect(result.choose).toBeTruthy();
+    // Nothing is connected until the user picks.
+    expect(await listAccounts(owner, workspace.id)).toHaveLength(0);
+    expect(provider.connectedTargetIds).toEqual([]);
+  });
+
+  it("holds the token encrypted while it waits for the choice", async () => {
+    const { owner, workspace } = await setup();
+    const { choose } = await startChoice(owner, workspace.id);
+
+    const draft = await SocialConnectionDraft.findOne({
+      _id: choose,
+      workspace: workspace.id,
+    }).select("+encryptedAccessToken");
+    expect(draft?.targets.map((target) => target.id)).toEqual(["page-1", "page-2"]);
+    expect(draft?.encryptedAccessToken).not.toContain(provider.lastAccessToken);
+    expect(JSON.stringify(draft)).not.toContain(provider.lastAccessToken);
+    // The OAuth state is spent either way.
+    expect(await SocialOAuthState.countDocuments({ workspace: workspace.id })).toBe(0);
+  });
+
+  it("lists the choices and connects the one the user picks", async () => {
+    const { owner, workspace } = await setup();
+    const { choose } = await startChoice(owner, workspace.id);
+    const path = `/social-accounts/connections/${choose}?workspaceId=${workspace.id}`;
+
+    const listed = await call(owner, "get", path).expect(200);
+    expect(listed.body.data.targets).toHaveLength(2);
+    expect(listed.body.data.platform).toBe("LINKEDIN");
+
+    const chosen = await call(owner, "post", path, { targetId: "page-2" }).expect(200);
+    expect(chosen.body.data.account).toMatchObject({
+      providerAccountId: "page-2",
+      accountName: "Acme Roastery",
+      status: "CONNECTED",
+    });
+    expect(provider.connectedTargetIds).toEqual(["page-2"]);
+
+    const accounts = await listAccounts(owner, workspace.id);
+    expect(accounts.map((account) => account.providerAccountId)).toEqual(["page-2"]);
+    // The draft is spent once used.
+    expect(await SocialConnectionDraft.countDocuments({ workspace: workspace.id })).toBe(0);
+  });
+
+  it("refuses an account that wasn't part of the authorization", async () => {
+    const { owner, workspace } = await setup();
+    const { choose } = await startChoice(owner, workspace.id);
+
+    const res = await call(
+      owner,
+      "post",
+      `/social-accounts/connections/${choose}?workspaceId=${workspace.id}`,
+      { targetId: "page-999" },
+    ).expect(400);
+    expect(res.body.message).toContain("isn't part of this connection");
+    expect(provider.connectedTargetIds).toEqual([]);
+  });
+
+  it("keeps drafts inside their workspace, and to admins", async () => {
+    const { owner, workspace } = await setup();
+    const { choose } = await startChoice(owner, workspace.id);
+    const path = `/social-accounts/connections/${choose}?workspaceId=${workspace.id}`;
+
+    const editor = await createUser("Eddie Editor");
+    await addMember(owner, workspace.id, editor, "EDITOR");
+    await call(editor, "get", path).expect(403);
+
+    const outsider = await createUser("Olive Outsider");
+    const otherWorkspace = await createWorkspace(outsider);
+    await call(
+      outsider,
+      "get",
+      `/social-accounts/connections/${choose}?workspaceId=${otherWorkspace.id}`,
+    ).expect(404);
+  });
+
+  it("connects straight away when the login granted only one account", async () => {
+    const { owner, workspace } = await setup();
+    provider.offerTargets([TARGETS[0]]);
+
+    const start = await startConnection(owner, workspace.id).expect(200);
+    const approval = provider.approve(start.body.data.authorizationUrl);
+    const result = redirectResult(await sendCallback(owner, approval, bindingCookie(start)));
+
+    expect(result).toEqual({ platform: "linkedin", connected: "1", workspaceId: workspace.id });
+    expect(provider.connectedTargetIds).toEqual(["page-1"]);
+    expect((await listAccounts(owner, workspace.id))[0].providerAccountId).toBe("page-1");
   });
 });

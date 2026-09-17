@@ -53,6 +53,12 @@ export const UpdateContentStrategy = async (req: Request, res: Response) => {
   sendSuccess(res, { message: "Strategy saved", data: { strategy } });
 };
 
+export const DeleteContentStrategy = async (req: Request, res: Response) => {
+  const { strategyId } = req.params as ContentStrategyParams;
+  await ContentStrategyService.deleteStrategy(getWorkspaceContext(req), strategyId);
+  sendSuccess(res, { message: "Strategy deleted", data: null });
+};
+
 export const ActivateContentStrategy = async (req: Request, res: Response) => {
   const { strategyId } = req.params as ContentStrategyParams;
   const strategy = await ContentStrategyService.activateStrategy(

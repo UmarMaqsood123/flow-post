@@ -30,7 +30,9 @@ import { getSocialProviderRegistry } from "../integrations/social/registry";
 import type {
   AnalyticsQuery,
   AnalyticsResult,
+  ConnectionTarget,
   MediaAsset,
+  OAuthConnection,
   OAuthTokenSet,
   ProviderCredentials,
   ProviderPost,
@@ -39,6 +41,7 @@ import type {
   PublishTextInput,
   PublishVideoInput,
   SocialProfile,
+  VideoFormat,
 } from "../integrations/social/types";
 import { StoredFile } from "../models/file.model";
 import {
@@ -47,9 +50,13 @@ import {
   type SocialAccountDocument,
   toPublicSocialAccount,
 } from "../models/socialAccount.model";
+import {
+  SocialConnectionDraft,
+  type SocialConnectionDraftDocument,
+} from "../models/socialConnectionDraft.model";
 import { SocialOAuthState, type SocialOAuthStateDocument } from "../models/socialOAuthState.model";
-import { User } from "../models/user.model";
-import { Workspace } from "../models/workspace.model";
+import { User, type UserDocument } from "../models/user.model";
+import { Workspace, type WorkspaceDocument } from "../models/workspace.model";
 import { WorkspaceMember } from "../models/workspaceMember.model";
 import { AppError } from "../utils/appError.util";
 import { getTokenSecretBox, type SecretBox } from "../utils/encryption.util";
@@ -57,6 +64,9 @@ import { getStorage } from "../utils/storage.util";
 import { generateOpaqueToken, hashToken } from "../utils/token.util";
 import type { WorkspaceContext } from "../utils/workspaceContext.util";
 import { hasMinimumRole } from "../utils/workspaceRoles.util";
+import * as EntitlementService from "./entitlement.service";
+import { UserStatus } from "../constants/auth.constant";
+import * as NotificationEvents from "./notificationEvents.service";
 
 /** Refresh tokens that expire within this window before using them. */
 const TOKEN_REFRESH_LEEWAY_MS = 5 * 60_000;
@@ -199,6 +209,9 @@ const tokenContext = (
 const codeVerifierContext = (state: SocialOAuthStateDocument) =>
   `social-oauth-state:${state._id.toString()}`;
 
+const draftTokenContext = (draft: SocialConnectionDraftDocument) =>
+  `social-connection-draft:${draft._id.toString()}`;
+
 /** Where the platform sends the browser back: the API callback (proxied in development). */
 const callbackUrlFor = (provider: SocialProvider) =>
   provider.oauth.redirectUri ??
@@ -266,7 +279,12 @@ const recordFailure = async (
   account: SocialAccountDocument,
   failure: { code: string; message: string },
   status?: SocialAccountStatusValue,
+  {
+    needsReconnect = status === SocialAccountStatus.REAUTH_REQUIRED ||
+      status === SocialAccountStatus.ERROR,
+  }: { needsReconnect?: boolean } = {},
 ) => {
+  const changed = status !== undefined && account.status !== status;
   if (status) account.status = status;
   account.lastError = {
     code: failure.code.slice(0, 100),
@@ -274,6 +292,9 @@ const recordFailure = async (
     occurredAt: new Date(),
   };
   await account.save();
+  if (changed && needsReconnect) {
+    await NotificationEvents.socialAccountNeedsAttention(account, failure.message);
+  }
 };
 
 /** Records what a provider failure means for the account, then throws the API error. */
@@ -294,7 +315,82 @@ const handleProviderFailure = async (
 
 // ── Tokens ─────────────────────────────────────────────────
 
+const REFRESH_LEASE_MS = 60_000;
+const REFRESH_WAIT_MS = 20_000;
+
+/** Copies freshly stored tokens from the database onto an in-memory account. */
+const reloadTokens = async (account: SocialAccountDocument) => {
+  const latest = await SocialAccount.findOne({ _id: account._id, workspace: account.workspace })
+    .select("+encryptedAccessToken +encryptedRefreshToken")
+    .lean();
+  if (!latest) return;
+  account.set({
+    encryptedAccessToken: latest.encryptedAccessToken,
+    encryptedRefreshToken: latest.encryptedRefreshToken,
+    tokenExpiresAt: latest.tokenExpiresAt,
+    refreshTokenExpiresAt: latest.refreshTokenExpiresAt,
+    status: latest.status,
+    lastRefreshedAt: latest.lastRefreshedAt,
+    lastError: latest.lastError,
+  });
+};
+
+/**
+ * Refreshes once across all processes. Platforms that rotate refresh tokens
+ * (TikTok) invalidate the old one on use, so two workers refreshing together
+ * would leave one holding a dead token and mark the account for reconnection.
+ * Whoever doesn't get the lease waits for the holder and uses its result.
+ */
 const refreshTokens = async (
+  account: SocialAccountDocument,
+  provider: SocialProvider,
+  box: SecretBox,
+) => {
+  const readAt = account.lastRefreshedAt?.getTime() ?? 0;
+  const deadline = Date.now() + REFRESH_WAIT_MS;
+  for (;;) {
+    const now = new Date();
+    const leased = await SocialAccount.updateOne(
+      {
+        _id: account._id,
+        workspace: account.workspace,
+        $or: [{ refreshLockedUntil: null }, { refreshLockedUntil: { $lte: now } }],
+      },
+      { $set: { refreshLockedUntil: new Date(now.getTime() + REFRESH_LEASE_MS) } },
+    );
+    if (leased.modifiedCount > 0) break;
+    if (Date.now() > deadline) {
+      throw new AppError(
+        `${provider.displayName} access is being renewed. Try again shortly.`,
+        HttpStatus.SERVICE_UNAVAILABLE,
+        { code: ErrorCode.SOCIAL_PROVIDER_UNAVAILABLE },
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+
+  try {
+    // Someone else may have refreshed while this process waited or read a stale copy.
+    await reloadTokens(account);
+    const refreshedMeanwhile = (account.lastRefreshedAt?.getTime() ?? 0) > readAt;
+    const stillFresh =
+      account.tokenExpiresAt !== null &&
+      account.tokenExpiresAt !== undefined &&
+      account.tokenExpiresAt.getTime() - Date.now() > TOKEN_REFRESH_LEEWAY_MS;
+    if (refreshedMeanwhile && stillFresh && account.status === SocialAccountStatus.CONNECTED) {
+      return;
+    }
+    await refreshTokensLocked(account, provider, box);
+  } finally {
+    await SocialAccount.updateOne(
+      { _id: account._id, workspace: account.workspace },
+      { $set: { refreshLockedUntil: null } },
+    );
+    account.set({ refreshLockedUntil: null });
+  }
+};
+
+const refreshTokensLocked = async (
   account: SocialAccountDocument,
   provider: SocialProvider,
   box: SecretBox,
@@ -310,6 +406,8 @@ const refreshTokens = async (
       account,
       { code: "TOKEN_EXPIRED", message: `The ${provider.displayName} connection has expired.` },
       SocialAccountStatus.EXPIRED,
+      // Nothing can refresh it: only reconnecting helps.
+      { needsReconnect: true },
     );
     throw reauthRequired(provider);
   }
@@ -512,6 +610,9 @@ export const startConnection = async (
 ): Promise<StartedConnection> => {
   const box = requireSecretBox();
   const provider = getAvailableProvider(platform);
+  // Checked up front so nobody goes through a platform's consent screen for nothing.
+  // Reconnecting an existing account is checked again (and allowed) when it's stored.
+  await EntitlementService.assertCanAddSocialAccount(workspace);
 
   const state = generateOpaqueToken(32);
   const browserBinding = generateOpaqueToken(32);
@@ -575,6 +676,7 @@ const loadConnectionContext = async (oauthState: SocialOAuthStateDocument) => {
   ]);
   if (
     !user ||
+    user.status === UserStatus.SUSPENDED ||
     !workspace ||
     workspace.status !== WorkspaceStatus.ACTIVE ||
     !member ||
@@ -584,6 +686,15 @@ const loadConnectionContext = async (oauthState: SocialOAuthStateDocument) => {
   }
   return { user, workspace };
 };
+
+/**
+ * A callback either finished the connection or, when the login covered several
+ * accounts, left a draft for the user to choose from.
+ */
+export type CompletedConnection = { workspaceId: string } & (
+  | { account: PublicSocialAccount; selection?: undefined }
+  | { account?: undefined; selection: { draftId: string; targets: ConnectionTarget[] } }
+);
 
 export interface CompleteConnectionInput {
   platform: SocialPlatformValue;
@@ -602,7 +713,7 @@ export const completeConnection = async ({
   code,
   state,
   browserBinding,
-}: CompleteConnectionInput): Promise<{ account: PublicSocialAccount; workspaceId: string }> => {
+}: CompleteConnectionInput): Promise<CompletedConnection> => {
   const box = requireSecretBox();
   const provider = getAvailableProvider(platform);
 
@@ -626,6 +737,72 @@ export const completeConnection = async ({
   const { tokens, profile } = await callProvider(() =>
     provider.handleOAuthCallback({ code, redirectUri: oauthState.redirectUri, codeVerifier }),
   );
+
+  // Platforms where one login covers several accounts (Facebook Pages, Instagram
+  // professional accounts) hand back the candidates instead of a finished
+  // connection, so the user picks rather than us guessing.
+  if (provider.listConnectionTargets && provider.connectTarget) {
+    const targets = await callProvider(() => provider.listConnectionTargets!(tokens));
+    if (targets.length > 1) {
+      const draft = await saveConnectionDraft({
+        workspaceId: workspace._id,
+        userId: user._id,
+        platform,
+        tokens,
+        targets,
+        box,
+      });
+      await SocialOAuthState.deleteOne({ _id: oauthState._id, workspace: workspace._id });
+      return { selection: { draftId: draft.id, targets }, workspaceId: workspace.id };
+    }
+    if (targets.length === 1) {
+      const chosen = await callProvider(() => provider.connectTarget!(tokens, targets[0].id));
+      const account = await storeConnection({
+        workspace,
+        user,
+        platform,
+        provider,
+        connection: chosen,
+        box,
+      });
+      await SocialOAuthState.deleteOne({ _id: oauthState._id, workspace: workspace._id });
+      return { account, workspaceId: workspace.id };
+    }
+  }
+
+  const account = await storeConnection({
+    workspace,
+    user,
+    platform,
+    provider,
+    connection: { tokens, profile },
+    box,
+  });
+  await SocialOAuthState.deleteOne({ _id: oauthState._id, workspace: workspace._id });
+  return { account, workspaceId: workspace.id };
+};
+
+interface StoreConnectionInput {
+  workspace: WorkspaceDocument;
+  user: UserDocument;
+  platform: SocialPlatformValue;
+  provider: SocialProvider;
+  connection: OAuthConnection;
+  box: SecretBox;
+}
+
+/**
+ * Creates or refreshes the stored account for a finished connection. Reconnecting
+ * the same account reuses its record, so history and schedules survive.
+ */
+const storeConnection = async ({
+  workspace,
+  user,
+  platform,
+  provider,
+  connection: { tokens, profile },
+  box,
+}: StoreConnectionInput): Promise<PublicSocialAccount> => {
   if (!profile.providerAccountId || !profile.accountName) {
     throw toAppError(
       new SocialProviderError(
@@ -647,6 +824,10 @@ export const completeConnection = async ({
       platform,
       providerAccountId: profile.providerAccountId,
     });
+  // A new account, or one that was disconnected, takes a slot again.
+  if (account.isNew || account.status === SocialAccountStatus.DISCONNECTED) {
+    await EntitlementService.assertCanAddSocialAccount(workspace);
+  }
 
   applyProfile(account, profile);
   try {
@@ -663,13 +844,110 @@ export const completeConnection = async ({
     lastError: null,
   });
   await account.save();
-  await SocialOAuthState.deleteOne({ _id: oauthState._id, workspace: workspace._id });
 
   logger.info(
     { userId: user.id, workspaceId: workspace.id, platform, accountId: account.id },
     "Social account connected",
   );
-  return { account: toPublic(account), workspaceId: workspace.id };
+  return toPublic(account);
+};
+
+interface SaveDraftInput {
+  workspaceId: Types.ObjectId;
+  userId: Types.ObjectId;
+  platform: SocialPlatformValue;
+  tokens: OAuthTokenSet;
+  targets: ConnectionTarget[];
+  box: SecretBox;
+}
+
+/** Holds the authorization while the user chooses which account to connect. */
+const saveConnectionDraft = async ({
+  workspaceId,
+  userId,
+  platform,
+  tokens,
+  targets,
+  box,
+}: SaveDraftInput): Promise<SocialConnectionDraftDocument> => {
+  const draft = new SocialConnectionDraft({
+    workspace: workspaceId,
+    user: userId,
+    platform,
+    scopes: tokens.scopes,
+    targets: targets.map((target) => ({
+      id: target.id,
+      name: target.name,
+      username: target.username ?? null,
+      image: safeHttpUrl(target.image) ?? null,
+      description: target.description ?? null,
+    })),
+    expiresAt: new Date(Date.now() + env.SOCIAL_OAUTH_STATE_TTL_MINUTES * 60_000),
+  });
+  draft.encryptedAccessToken = box.encrypt(tokens.accessToken, draftTokenContext(draft));
+  await draft.save();
+  return draft;
+};
+
+/** The accounts a pending authorization could connect, for the picker. */
+export const listConnectionChoices = async (
+  { workspace, user }: WorkspaceContext,
+  draftId: string,
+): Promise<{ platform: SocialPlatformValue; targets: ConnectionTarget[] }> => {
+  // Only the admin who authorized it, and only until it expires (TTL cleanup can lag).
+  const draft = await SocialConnectionDraft.findOne({
+    _id: draftId,
+    workspace: workspace._id,
+    user: user._id,
+    expiresAt: { $gt: new Date() },
+  });
+  if (!draft) throw AppError.notFound("That connection has expired. Start again.");
+  return { platform: draft.platform, targets: draft.targets };
+};
+
+/** Finishes a held authorization against the account the user picked. */
+export const completeConnectionChoice = async (
+  { workspace, user }: WorkspaceContext,
+  draftId: string,
+  targetId: string,
+): Promise<PublicSocialAccount> => {
+  const box = requireSecretBox();
+  const pending = await SocialConnectionDraft.findOne({
+    _id: draftId,
+    workspace: workspace._id,
+    user: user._id,
+    expiresAt: { $gt: new Date() },
+  }).select("targets");
+  if (!pending) throw AppError.notFound("That connection has expired. Start again.");
+  if (!pending.targets.some((target) => target.id === targetId)) {
+    throw AppError.badRequest("That account isn't part of this connection");
+  }
+  // Claimed by deleting it: a draft completes once, even with concurrent requests.
+  const draft = await SocialConnectionDraft.findOneAndDelete({
+    _id: draftId,
+    workspace: workspace._id,
+    user: user._id,
+    expiresAt: { $gt: new Date() },
+  }).select("+encryptedAccessToken");
+  if (!draft) throw AppError.notFound("That connection has expired. Start again.");
+
+  const provider = getAvailableProvider(draft.platform);
+  if (!provider.connectTarget) {
+    throw AppError.internal(`${provider.displayName} doesn't support choosing an account`);
+  }
+  const accessToken = box.decrypt(draft.encryptedAccessToken, draftTokenContext(draft));
+  const connection = await callProvider(() =>
+    provider.connectTarget!({ accessToken, scopes: draft.scopes }, targetId),
+  );
+  const account = await storeConnection({
+    workspace,
+    user,
+    platform: draft.platform,
+    provider,
+    connection,
+    box,
+  });
+  return account;
 };
 
 /**
@@ -751,6 +1029,106 @@ export const publishImage = async (
   );
 };
 
+export interface WorkerPublishInput {
+  text: string;
+  /** YouTube's title; other platforms ignore it. */
+  title?: string | null;
+  media?: MediaAsset[];
+  /** Which provider method this post needs, worked out from what's attached. */
+  mediaKind?: "TEXT" | "IMAGES" | "VIDEO";
+  videoFormat?: VideoFormat | null;
+  /** Called just before the platform request, so the scheduler can mark it as sent. */
+  onRequestStart?: () => Promise<void>;
+}
+
+/** The capability a worker publish needs, matching what the provider will be called with. */
+const workerCapability = ({ mediaKind = "TEXT", media = [], videoFormat }: WorkerPublishInput) =>
+  mediaKind === "VIDEO"
+    ? requiredCapabilityForVideo(videoFormat ?? "standard")
+    : mediaKind === "IMAGES"
+      ? requiredCapabilityForImages(media.length)
+      : ("TEXT_POST" as const);
+
+/**
+ * Publishing from the background worker, which has no signed-in user. Account
+ * failures are recorded exactly as on the API path, but the provider error is
+ * rethrown unchanged so the scheduler can judge whether a retry is safe.
+ */
+export const publishForWorker = async (
+  workspaceId: Types.ObjectId,
+  accountId: string,
+  input: WorkerPublishInput,
+): Promise<PublishResult> => {
+  const { text, title, media = [], mediaKind = "TEXT", videoFormat, onRequestStart } = input;
+  const account = await SocialAccount.findOne({ _id: accountId, workspace: workspaceId }).select(
+    "+encryptedAccessToken +encryptedRefreshToken",
+  );
+  if (!account) throw AppError.notFound("Social account not found");
+
+  const provider = getProvider(account.platform);
+  assertCapability(provider, workerCapability(input));
+  // Refreshes the access token first when it has expired or is about to.
+  const credentials = await getCredentials(account, provider);
+
+  await onRequestStart?.();
+  try {
+    if (mediaKind === "VIDEO" && media[0]) {
+      return await provider.publishVideo(credentials, {
+        text,
+        title: title ?? undefined,
+        video: media[0],
+        format: videoFormat ?? "standard",
+      });
+    }
+    if (mediaKind === "IMAGES" && media.length > 0) {
+      return await provider.publishImage(credentials, { text, images: media });
+    }
+    return await provider.publishText(credentials, { text });
+  } catch (error) {
+    if (error instanceof SocialProviderError) {
+      await recordFailure(
+        account,
+        { code: error.kind, message: error.message },
+        STATUS_AFTER_FAILURE[error.kind],
+      );
+    }
+    throw error;
+  }
+};
+
+/**
+ * Reading metrics from the background collector, which has no signed-in user.
+ * A failure is recorded against the account the same way the API path does, so
+ * an expired token shows up on the account rather than only in the logs.
+ */
+export const getAnalyticsForAccount = async (
+  workspaceId: Types.ObjectId,
+  accountId: string,
+  query: AnalyticsQuery = {},
+): Promise<AnalyticsResult> => {
+  const account = await SocialAccount.findOne({ _id: accountId, workspace: workspaceId }).select(
+    "+encryptedAccessToken +encryptedRefreshToken",
+  );
+  if (!account) throw AppError.notFound("Social account not found");
+
+  const provider = getProvider(account.platform);
+  assertCapability(provider, "ANALYTICS");
+  const credentials = await getCredentials(account, provider);
+
+  try {
+    return await provider.getAnalytics(credentials, query);
+  } catch (error) {
+    if (error instanceof SocialProviderError) {
+      await recordFailure(
+        account,
+        { code: error.kind, message: error.message },
+        STATUS_AFTER_FAILURE[error.kind],
+      );
+    }
+    throw error;
+  }
+};
+
 export const publishVideo = (
   context: WorkspaceContext,
   accountId: string,
@@ -775,6 +1153,16 @@ export const publishPost = async (
   accountId: string,
   { text, fileId }: PublishPostInput,
 ): Promise<PublishResult> => {
+  await EntitlementService.assertPublishQuota(context.workspace);
+  logger.info(
+    {
+      workspaceId: context.workspace.id,
+      userId: context.user.id,
+      accountId,
+      withImage: Boolean(fileId),
+    },
+    "Direct publish requested",
+  );
   if (!fileId) return publishText(context, accountId, { text });
 
   const file = await StoredFile.findOne({ _id: fileId, workspace: context.workspace._id });
@@ -822,5 +1210,6 @@ export const deleteWorkspaceSocialData = async (workspaceId: Types.ObjectId): Pr
   await Promise.all([
     SocialAccount.deleteMany({ workspace: workspaceId }),
     SocialOAuthState.deleteMany({ workspace: workspaceId }),
+    SocialConnectionDraft.deleteMany({ workspace: workspaceId }),
   ]);
 };

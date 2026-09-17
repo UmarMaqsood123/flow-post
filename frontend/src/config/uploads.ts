@@ -26,3 +26,7 @@ export const MAX_UPLOAD_SIZE_MB = 10;
 /** Videos (mirrors UPLOAD_MAX_VIDEO_SIZE_MB). */
 export const MAX_VIDEO_SIZE_MB = 100;
 export const MAX_FILES_PER_UPLOAD = 10;
+
+/** Mirrors FILE_LIMITS in backend/src/models/file.model.ts. */
+export const MEDIA_NAME_MAX = 120;
+export const MEDIA_DESCRIPTION_MAX = 500;

@@ -3,6 +3,7 @@ import Logo from "@/components/shared/Logo";
 import { isNavItemActive, NAV_FOOTER_ITEMS, NAV_SECTIONS, type NavItem } from "@/config/navigation";
 import { cn } from "@/lib/utils";
 import { paths } from "@/routing/paths";
+import useSession from "@/services/auth/useSession";
 import useCurrentWorkspace from "@/services/workspace/useCurrentWorkspace";
 
 interface SidebarProps {
@@ -13,6 +14,8 @@ interface SidebarProps {
 function Sidebar({ onNavigate }: SidebarProps) {
   const { current } = useCurrentWorkspace();
   const { pathname } = useLocation();
+  const session = useSession();
+  const isSuperAdmin = session.data?.role === "super_admin";
 
   const renderItem = (item: NavItem) => {
     const active = isNavItemActive(item, pathname);
@@ -64,7 +67,7 @@ function Sidebar({ onNavigate }: SidebarProps) {
         })}
 
         <ul className="mt-auto flex flex-col gap-0.5 border-t border-line pt-3">
-          {NAV_FOOTER_ITEMS.map(renderItem)}
+          {NAV_FOOTER_ITEMS.filter((item) => !item.superAdminOnly || isSuperAdmin).map(renderItem)}
         </ul>
       </nav>
     </div>

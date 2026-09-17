@@ -3,7 +3,8 @@ export interface User {
   id: string;
   name: string;
   email: string;
-  role: "user" | "admin";
+  /** System role. Only `super_admin` can open the admin panel. */
+  role: "user" | "super_admin";
   emailVerified: boolean;
   emailVerifiedAt: string | null;
   createdAt: string;

@@ -1,5 +1,6 @@
-import { CheckCheck, CheckCircle2, RefreshCw, Trash2 } from "lucide-react";
+import { CheckCheck, RefreshCw, Trash2 } from "lucide-react";
 import { useState } from "react";
+import { ConfirmModal } from "@/components/modals";
 import PlatformBadge from "@/components/shared/PlatformBadge";
 import Alert from "@/components/ui/Alert";
 import Badge from "@/components/ui/Badge";
@@ -11,12 +12,12 @@ import {
   publishCapabilityLabels,
 } from "@/config/socialPlatforms";
 import { formatRelativeTime } from "@/lib/format";
-import { getErrorMessage } from "@/lib/forms";
 import {
   useDisconnectSocialAccount,
   useTestSocialAccount,
 } from "@/services/socialAccounts/useSocialAccounts";
 import type { SocialAccount } from "@/types/socialAccount";
+import { notify } from "@/lib/toast";
 
 function AccountAvatar({ account }: { account: SocialAccount }) {
   const [failedImage, setFailedImage] = useState<string | null>(null);
@@ -67,10 +68,12 @@ function SocialAccountCard({
   const accessNeedsReconnect = account.status === "EXPIRED" || account.status === "REAUTH_REQUIRED";
   const accessLabel = accessNeedsReconnect ? "Reconnect required" : expiry.label;
 
+  const [isDisconnectOpen, setIsDisconnectOpen] = useState(false);
+  const revokeHint = PLATFORM_DETAILS[account.platform].revokeHint;
+
   const handleDisconnect = () => {
-    const revokeHint = PLATFORM_DETAILS[account.platform].revokeHint;
-    const message = `Disconnect ${account.accountName}? FlowPost will delete its stored access and stop publishing to this account.${revokeHint ? `\n\n${revokeHint}` : ""}`;
-    if (window.confirm(message)) disconnect.mutate(account.id);
+    disconnect.reset();
+    setIsDisconnectOpen(true);
   };
 
   return (
@@ -98,7 +101,17 @@ function SocialAccountCard({
             <Button
               variant="secondary"
               className="px-3 py-1.5"
-              onClick={() => test.mutate(account.id)}
+              onClick={() =>
+                test.mutate(account.id, {
+                  onSuccess: (tested) => {
+                    // A test that finds a problem updates the status box on the card instead.
+                    if (tested.account.status === "CONNECTED") {
+                      notify.success(`${account.accountName}: the connection is working.`);
+                    }
+                  },
+                  onError: (error) => notify.error(error),
+                })
+              }
               isLoading={test.isPending}
               disabled={needsReconnect}
             >
@@ -140,23 +153,32 @@ function SocialAccountCard({
           )}
         </Alert>
       )}
-      {test.isSuccess && !needsAttention && (
-        <p role="status" className="mt-3 flex items-center gap-1.5 text-sm text-green-700">
-          <CheckCircle2 className="size-4" aria-hidden="true" />
-          The connection is working.
-        </p>
-      )}
-      {/* When the test changed the status, the status box above already explains the problem. */}
-      {test.isError && !needsAttention && (
-        <Alert variant="error" className="mt-3">
-          {getErrorMessage(test.error)}
-        </Alert>
-      )}
-      {disconnect.isError && (
-        <Alert variant="error" className="mt-3">
-          {getErrorMessage(disconnect.error)}
-        </Alert>
-      )}
+      <ConfirmModal
+        open={isDisconnectOpen}
+        tone="danger"
+        title={`Disconnect ${account.accountName}?`}
+        message={
+          <div className="flex flex-col gap-2">
+            <p>
+              FlowPost will delete its stored access and stop publishing to this account. Scheduled
+              posts for it won't go out.
+            </p>
+            {revokeHint && <p className="text-muted">{revokeHint}</p>}
+          </div>
+        }
+        confirmLabel="Disconnect"
+        isLoading={disconnect.isPending}
+        error={disconnect.error}
+        onConfirm={() =>
+          disconnect.mutate(account.id, {
+            onSuccess: () => {
+              setIsDisconnectOpen(false);
+              notify.success(`${account.accountName} disconnected.`);
+            },
+          })
+        }
+        onClose={() => setIsDisconnectOpen(false)}
+      />
 
       <dl className="mt-4 grid gap-3 border-t border-line pt-4 text-sm sm:grid-cols-3">
         <div>

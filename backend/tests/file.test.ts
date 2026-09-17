@@ -211,6 +211,83 @@ describe("File uploads", () => {
   });
 });
 
+describe("Media names and descriptions", () => {
+  it("stores a name and description, and falls back to the file name without one", async () => {
+    const alice = await createUser("Alice");
+    const workspace = await createWorkspace(alice);
+
+    const named = await uploadOne(alice, workspace.id, { buffer: PNG, name: "IMG_0042.png" })
+      .field("name", "  Roastery at sunrise  ")
+      .field("description", "Shot for the October launch")
+      .expect(201);
+    expect(named.body.data.file).toMatchObject({
+      name: "Roastery at sunrise",
+      fileName: "IMG_0042.png",
+      description: "Shot for the October launch",
+    });
+
+    // Logo uploads elsewhere send no name, and keep working as before.
+    const plain = await uploadOne(alice, workspace.id, { buffer: PNG, name: "logo.png" }).expect(
+      201,
+    );
+    expect(plain.body.data.file).toMatchObject({
+      name: "logo.png",
+      fileName: "logo.png",
+      description: null,
+    });
+  });
+
+  it("lines up names with files in a batch", async () => {
+    const alice = await createUser("Alice");
+    const workspace = await createWorkspace(alice);
+
+    const res = await uploadMany(alice, workspace.id, [
+      { buffer: PDF, name: "a.pdf" },
+      { buffer: CSV, name: "b.csv" },
+    ])
+      .field(
+        "metadata",
+        JSON.stringify([{ name: "Brand brief" }, { name: "Contacts", description: "Q3 list" }]),
+      )
+      .expect(201);
+
+    expect(
+      res.body.data.files.map((file: { name: string; description: string | null }) => [
+        file.name,
+        file.description,
+      ]),
+    ).toEqual([
+      ["Brand brief", null],
+      ["Contacts", "Q3 list"],
+    ]);
+
+    const listed = await call(alice, "get", `/workspaces/${workspace.id}/files`).expect(200);
+    expect(listed.body.data.files.map((file: { name: string }) => file.name).sort()).toEqual([
+      "Brand brief",
+      "Contacts",
+    ]);
+  });
+
+  it("rejects a name that's too long, and removes the temp file", async () => {
+    const alice = await createUser("Alice");
+    const workspace = await createWorkspace(alice);
+
+    await uploadOne(alice, workspace.id, { buffer: PNG, name: "a.png" })
+      .field("name", "x".repeat(121))
+      .expect(422);
+    await uploadMany(alice, workspace.id, [{ buffer: PDF, name: "a.pdf" }])
+      .field("metadata", "not json")
+      .expect(422);
+    // More names than files is a mistake worth catching, not silently ignoring.
+    await uploadMany(alice, workspace.id, [{ buffer: PDF, name: "a.pdf" }])
+      .field("metadata", JSON.stringify([{ name: "One" }, { name: "Two" }]))
+      .expect(400);
+
+    expect(await storedCount(workspace.id)).toBe(0);
+    expect(readdirSync(UPLOAD_TEMP_DIR)).toHaveLength(0);
+  });
+});
+
 describe("Video uploads", () => {
   it("accepts MP4 and WebM, serves them inline and filters them as videos", async () => {
     const alice = await createUser("Alice");

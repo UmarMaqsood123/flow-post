@@ -69,7 +69,7 @@ function AppLayout() {
               type="button"
               onClick={closeSidebar}
               aria-label="Close navigation"
-              className="absolute top-3 right-3 z-10 inline-flex size-10 items-center justify-center rounded-md hover:bg-slate-100"
+              className="absolute top-3 right-3 z-10 inline-flex size-10 cursor-pointer items-center justify-center rounded-md hover:bg-slate-100"
             >
               <X className="size-5" aria-hidden="true" />
             </button>

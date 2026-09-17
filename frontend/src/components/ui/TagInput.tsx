@@ -120,7 +120,7 @@ function TagInput({
                     onChange(value.filter((_, itemIndex) => itemIndex !== index));
                     setNotice(null);
                   }}
-                  className="inline-flex size-5 shrink-0 items-center justify-center rounded-full hover:bg-primary/15"
+                  className="inline-flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-full hover:bg-primary/15"
                 >
                   <X className="size-3.5" aria-hidden="true" />
                 </button>

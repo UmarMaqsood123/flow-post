@@ -91,24 +91,20 @@ describe("Generating posts", () => {
       },
       currentVersion: { version: 1, source: "GENERATE", label: "Generated" },
     });
-    // LinkedIn uses hook, body, CTA and hashtags, but never a title, script or visual idea.
+    // LinkedIn uses hook, body, CTA and hashtags, but never a title.
     expect(linkedIn.currentVersion.content).toMatchObject({
       title: null,
       hook: "Fresh beans taste better.",
       body: expect.any(String),
       cta: "Shop the roast [link]",
-      script: [],
-      visualIdea: null,
       hashtags: ["#coffee"],
     });
-    // Instagram keeps the caption, hashtags and visual idea only.
+    // Instagram keeps the caption and hashtags only.
     expect(instagram.currentVersion.content).toMatchObject({
       title: null,
       hook: null,
       body: null,
       cta: null,
-      script: [],
-      visualIdea: "INSTAGRAM visual",
       text: "INSTAGRAM text about fresh coffee",
     });
 
@@ -346,28 +342,29 @@ describe("Listing, status and permissions", () => {
 
     const tikTok = await call(owner, "get", `${postsPath()}?platform=TIKTOK`).expect(200);
     expect(tikTok.body.data).toHaveLength(1);
-    expect(tikTok.body.data[0].currentVersion.content.script).toHaveLength(1);
+    expect(tikTok.body.data[0].platform).toBe("TIKTOK");
 
     const paged = await call(owner, "get", `${postsPath()}?page=2&limit=2`).expect(200);
     expect(paged.body.data).toHaveLength(1);
     expect(paged.body.meta.pagination).toMatchObject({ page: 2, hasPrevPage: true });
   });
 
-  it("marks a post ready and blocks changes once archived", async () => {
+  it("moves through the review statuses", async () => {
     const created = await generateOne();
     const ready = await call(owner, "patch", `${postsPath()}/${created.id}/status`, {
       status: "READY",
     }).expect(200);
     expect(ready.body.data.post.status).toBe("READY");
 
-    await call(owner, "patch", `${postsPath()}/${created.id}/status`, {
-      status: "ARCHIVED",
+    const approved = await call(owner, "patch", `${postsPath()}/${created.id}/status`, {
+      status: "APPROVED",
     }).expect(200);
-    await call(owner, "patch", `${postsPath()}/${created.id}`, {
-      baseVersion: 1,
-      content: postContent(),
-    }).expect(409);
-    await refine(owner, created.id, { action: "SHORTEN" }).expect(409);
+    expect(approved.body.data.post.status).toBe("APPROVED");
+
+    // Publishing statuses belong to the publisher, not to people.
+    await call(owner, "patch", `${postsPath()}/${created.id}/status`, {
+      status: "PUBLISHED",
+    }).expect(422);
 
     await call(owner, "patch", `${postsPath()}/${created.id}/status`, { status: "DRAFT" }).expect(
       200,

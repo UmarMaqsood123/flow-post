@@ -1,6 +1,7 @@
 import type { Request, Response } from "express";
 import * as AdminMetrics from "../services/adminMetrics.service";
 import * as AdminService from "../services/admin.service";
+import * as ContactService from "../services/contact.service";
 import { sendSuccess } from "../utils/apiResponse.util";
 import { getAuthenticatedUser } from "../utils/request.util";
 import type {
@@ -15,6 +16,10 @@ import type {
   ReactivateUserInput,
   SuspendUserInput,
 } from "../validators/admin.validator";
+import type {
+  ListContactMessagesQuery,
+  UpdateContactMessageInput,
+} from "../validators/contact.validator";
 
 type IdParams = { id: string };
 const actor = (req: Request): AdminService.AdminActor => ({
@@ -120,4 +125,21 @@ export const ListAuditLogs = async (req: Request, res: Response) => {
     message: "Audit log",
     data: await AdminService.listAuditLogs(query<ListAuditLogsQuery>(req)),
   });
+};
+
+export const ListContactMessages = async (req: Request, res: Response) => {
+  sendSuccess(res, {
+    message: "Contact messages",
+    data: await ContactService.listContactMessages(query<ListContactMessagesQuery>(req)),
+  });
+};
+
+export const UpdateContactMessage = async (req: Request, res: Response) => {
+  const { id } = req.params as IdParams;
+  const message = await ContactService.updateContactMessage(
+    getAuthenticatedUser(req),
+    id,
+    req.body as UpdateContactMessageInput,
+  );
+  sendSuccess(res, { message: "Message updated", data: message });
 };

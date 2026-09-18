@@ -216,7 +216,7 @@ function AICreatePage() {
     <div className="flex w-full flex-col gap-6">
       <PageHeader
         title="AI Create"
-        description="One brief, one post per platform — each written for that platform, not copied across."
+        description="One brief, one post per platform. Each post is written for its platform, not copied across."
         actions={
           canWrite &&
           !showBrief && (
@@ -262,7 +262,7 @@ function AICreatePage() {
         <Alert variant="info">
           <div className="flex items-center gap-3">
             <Spinner className="size-4 shrink-0" />
-            <p>Writing your posts. This usually takes under a minute — keep this page open.</p>
+            <p>Writing your posts. This usually takes under a minute, so keep this page open.</p>
           </div>
         </Alert>
       )}
@@ -372,7 +372,7 @@ function AICreatePage() {
                     isLocked
                       ? "Published posts can't be changed. Duplicate it from the calendar to work on a new version."
                       : hasUnsavedEdits
-                        ? "Save or reset your edits first — an AI change would replace them."
+                        ? "Save or reset your edits first. An AI change would replace them."
                         : null
                   }
                   pendingAction={pendingAction}

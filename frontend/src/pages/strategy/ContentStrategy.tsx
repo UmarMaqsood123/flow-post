@@ -291,7 +291,7 @@ function ContentStrategyPage() {
       )}
       <PageHeader
         title="Content strategy"
-        description={`What ${current.workspace.name} posts, where and why — generated from the brand profile and yours to edit.`}
+        description={`What ${current.workspace.name} posts, where and why. It's generated from the brand profile, and you can edit all of it.`}
         actions={
           hasStrategies &&
           canGenerate &&
@@ -343,8 +343,8 @@ function ContentStrategyPage() {
           <div className="flex items-center gap-3">
             <Spinner className="size-4 shrink-0" />
             <p>
-              Generating your strategy from the brand profile. This usually takes a minute or two —
-              keep this page open.
+              Generating your strategy from the brand profile. This usually takes a minute or two,
+              so keep this page open.
             </p>
           </div>
         </Alert>

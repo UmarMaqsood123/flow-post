@@ -74,6 +74,8 @@ function ForgotPassword() {
 
         <TextField
           label="Email"
+          required
+          placeholder="you@example.com"
           type="email"
           autoComplete="email"
           error={errors.email?.message}

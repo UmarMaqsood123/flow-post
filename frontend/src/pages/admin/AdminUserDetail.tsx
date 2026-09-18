@@ -102,7 +102,7 @@ function AdminUserDetail() {
               <DetailCard title="Billing">
                 <Facts
                   items={[
-                    ["Plan in force", <PlanBadge key="plan" plan={data.billing.plan} />],
+                    ["Current plan", <PlanBadge key="plan" plan={data.billing.plan} />],
                     ["Why", data.billing.planReason.replaceAll("_", " ")],
                     [
                       "Subscription",

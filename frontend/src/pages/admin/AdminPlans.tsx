@@ -14,7 +14,7 @@ function AdminPlans() {
   return (
     <AdminShell
       title="Plans"
-      description="Limits come from backend/src/constants/billing.constant.ts; prices come from Stripe. Changing either is a deploy, not an admin action."
+      description="Limits come from backend/src/constants/billing.constant.ts; prices come from Stripe. Changing either needs a deploy and can't be done from here."
     >
       <AsyncContent
         isLoading={plans.isPending}

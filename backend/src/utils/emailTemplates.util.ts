@@ -64,13 +64,13 @@ export const passwordResetEmailTemplate = ({
   expiresInMinutes: number;
 }): EmailContent => ({
   subject: `Reset your ${APP_NAME} password`,
-  text: `Hi ${name},\n\nWe received a request to reset your password. Open this link to choose a new one:\n${url}\n\nThis link expires in ${expiresInMinutes} minutes. If you didn't request this, you can ignore this email — your password won't change.`,
+  text: `Hi ${name},\n\nWe received a request to reset your password. Open this link to choose a new one:\n${url}\n\nThis link expires in ${expiresInMinutes} minutes. If you didn't request this, you can ignore this email. Your password won't change.`,
   html: layout(
     "Reset your password",
     `<p>Hi ${escapeHtml(name)},</p>
      <p>We received a request to reset your password.</p>
      ${button(url, "Choose a new password")}
-     <p style="font-size:13px;color:#64748b">This link expires in ${expiresInMinutes} minutes. If you didn't request this, you can ignore this email — your password won't change.</p>`,
+     <p style="font-size:13px;color:#64748b">This link expires in ${expiresInMinutes} minutes. If you didn't request this, you can ignore this email. Your password won't change.</p>`,
   ),
 });
 

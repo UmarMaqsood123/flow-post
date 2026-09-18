@@ -72,7 +72,7 @@ function BriefForm({ isSubmitting, error, onSubmit, onCancel }: BriefFormProps) 
         options={CREATE_PLATFORM_OPTIONS}
         value={platforms}
         onChange={setPlatforms}
-        hint="Each platform gets its own version — never the same post twice."
+        hint="Each platform gets its own version, never the same post twice."
         error={platformsError}
         disabled={isSubmitting}
       />

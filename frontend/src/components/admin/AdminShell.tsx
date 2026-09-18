@@ -14,6 +14,7 @@ const SECTIONS = [
   { label: "AI usage", to: paths.adminAIUsage },
   { label: "Connections", to: paths.adminSocialConnections },
   { label: "Publishing failures", to: paths.adminPublishingFailures },
+  { label: "Messages", to: paths.adminContactMessages },
   { label: "Audit log", to: paths.adminAuditLog },
 ];
 

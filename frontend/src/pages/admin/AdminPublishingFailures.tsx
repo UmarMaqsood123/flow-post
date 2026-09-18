@@ -21,7 +21,7 @@ function AdminPublishingFailures() {
   return (
     <AdminShell
       title="Publishing failures"
-      description="Publishes that failed on every attempt. “Needs review” means the platform may have the post already, so it must not simply be retried."
+      description="Publishes that failed on every attempt. “Needs review” means the platform may already have the post, so check before retrying."
     >
       <FilterBar>
         <SelectFilter

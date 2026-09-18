@@ -29,7 +29,7 @@ export const BRAND_GOAL_OPTIONS: ChoiceOption<BrandGoal>[] = [
   {
     value: "ENGAGEMENT",
     label: "Increase engagement",
-    description: "Spark comments, shares and conversations.",
+    description: "Get more comments, shares and conversations.",
   },
   {
     value: "WEBSITE_TRAFFIC",
@@ -39,7 +39,7 @@ export const BRAND_GOAL_OPTIONS: ChoiceOption<BrandGoal>[] = [
   {
     value: "SALES",
     label: "Increase sales",
-    description: "Promote products and offers that convert.",
+    description: "Promote your products and offers.",
   },
   {
     value: "FOLLOWER_GROWTH",

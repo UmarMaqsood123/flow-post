@@ -49,7 +49,7 @@ function AdminSubscriptionDetail() {
               <DetailCard title="Subscription">
                 <Facts
                   items={[
-                    ["Plan in force", <PlanBadge key="plan" plan={data.effectivePlan} />],
+                    ["Current plan", <PlanBadge key="plan" plan={data.effectivePlan} />],
                     ["Why", data.planReason.replaceAll("_", " ")],
                     [
                       "Subscribed plan",
@@ -81,7 +81,7 @@ function AdminSubscriptionDetail() {
                     ],
                     ["Cancels at period end", subscription?.cancelAtPeriodEnd ? "Yes" : "No"],
                     [
-                      "Booked change",
+                      "Scheduled change",
                       subscription?.scheduledChange
                         ? `${PLAN_LABELS[subscription.scheduledChange.plan]} on ${formatDate(subscription.scheduledChange.effectiveAt)}`
                         : "None",

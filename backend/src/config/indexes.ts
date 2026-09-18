@@ -7,6 +7,7 @@ import "../models/autopilotEvent.model";
 import "../models/autopilotSettings.model";
 import "../models/autopilotSlot.model";
 import "../models/billingAccount.model";
+import "../models/contactMessage.model";
 import "../models/brandProfile.model";
 import "../models/contentStrategy.model";
 import "../models/file.model";

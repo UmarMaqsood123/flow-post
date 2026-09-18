@@ -94,6 +94,8 @@ function ResetPassword() {
 
         <TextField
           label="New password"
+          required
+          placeholder="Create a new password"
           type="password"
           autoComplete="new-password"
           hint={PASSWORD_HINT}
@@ -102,6 +104,8 @@ function ResetPassword() {
         />
         <TextField
           label="Confirm new password"
+          required
+          placeholder="Re-enter your new password"
           type="password"
           autoComplete="new-password"
           error={errors.confirmPassword?.message}

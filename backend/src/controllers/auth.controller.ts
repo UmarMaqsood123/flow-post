@@ -45,7 +45,7 @@ export const Register = async (req: Request, res: Response) => {
 
 export const Login = async (req: Request, res: Response) => {
   const session = await AuthService.loginUser(req.body as LoginInput, getRequestMeta(req));
-  sendSession(res, session, "Logged in successfully");
+  sendSession(res, session, "Logged in");
 };
 
 export const Refresh = async (req: Request, res: Response) => {
@@ -64,7 +64,7 @@ export const Refresh = async (req: Request, res: Response) => {
 export const Logout = async (req: Request, res: Response) => {
   await AuthService.logoutUser(getRefreshTokenFromCookie(req));
   clearRefreshTokenCookie(res);
-  sendSuccess(res, { data: null, message: "Logged out successfully" });
+  sendSuccess(res, { data: null, message: "Logged out" });
 };
 
 export const LogoutAll = async (req: Request, res: Response) => {
@@ -83,7 +83,7 @@ export const GetMe = (req: Request, res: Response) => {
 export const VerifyEmail = async (req: Request, res: Response) => {
   const { token } = req.body as VerifyEmailInput;
   const user = await AuthService.verifyEmail(token);
-  sendSuccess(res, { data: { user }, message: "Email verified successfully" });
+  sendSuccess(res, { data: { user }, message: "Email verified" });
 };
 
 export const ResendVerification = async (req: Request, res: Response) => {
@@ -105,7 +105,7 @@ export const ResetPassword = async (req: Request, res: Response) => {
   clearRefreshTokenCookie(res);
   sendSuccess(res, {
     data: null,
-    message: "Password reset successfully. Please log in with your new password.",
+    message: "Your password has been reset. Log in with your new password.",
   });
 };
 

@@ -645,3 +645,15 @@ describe("Entitlement enforcement", () => {
     expect(after).toMatchObject({ plan: "FREE", billingOwnerId: coOwner.id });
   });
 });
+
+describe("Public plan catalog", () => {
+  it("lists every plan with prices and limits, without signing in", async () => {
+    const res = await request(app).get("/api/v1/plans").expect(200);
+    expect(res.headers["cache-control"]).toContain("public");
+    const plans = res.body.data as { plan: string; priceMonthlyUsd: number; limits: object }[];
+    expect(plans.map((option) => option.plan)).toEqual(["FREE", "CREATOR", "PRO", "AGENCY"]);
+    expect(plans[0].priceMonthlyUsd).toBe(0);
+    for (const option of plans) expect(option.limits).toBeTruthy();
+    expect(JSON.stringify(plans)).not.toMatch(/price_/);
+  });
+});

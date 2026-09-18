@@ -55,12 +55,16 @@ function Signup() {
 
         <TextField
           label="Name"
+          required
+          placeholder="Jane Smith"
           autoComplete="name"
           error={errors.name?.message}
           {...register("name")}
         />
         <TextField
           label="Email"
+          required
+          placeholder="you@example.com"
           type="email"
           autoComplete="email"
           error={errors.email?.message}
@@ -68,6 +72,8 @@ function Signup() {
         />
         <TextField
           label="Password"
+          required
+          placeholder="Create a password"
           type="password"
           autoComplete="new-password"
           hint={PASSWORD_HINT}
@@ -76,6 +82,8 @@ function Signup() {
         />
         <TextField
           label="Confirm password"
+          required
+          placeholder="Re-enter your password"
           type="password"
           autoComplete="new-password"
           error={errors.confirmPassword?.message}

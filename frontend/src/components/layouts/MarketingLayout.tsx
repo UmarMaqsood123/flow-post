@@ -1,4 +1,4 @@
-import { Outlet } from "react-router";
+import { Outlet, ScrollRestoration } from "react-router";
 import MarketingFooter from "@/components/landing/MarketingFooter";
 import MarketingHeader from "@/components/landing/MarketingHeader";
 
@@ -17,6 +17,7 @@ function MarketingLayout() {
         <Outlet />
       </main>
       <MarketingFooter />
+      <ScrollRestoration />
     </div>
   );
 }

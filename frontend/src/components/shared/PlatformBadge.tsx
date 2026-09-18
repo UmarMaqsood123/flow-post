@@ -1,17 +1,25 @@
+import facebookLogo from "@/assets/platforms/facebook.svg";
+import instagramLogo from "@/assets/platforms/instagram.svg";
+import linkedinLogo from "@/assets/platforms/linkedin.svg";
+import pinterestLogo from "@/assets/platforms/pinterest.svg";
+import threadsLogo from "@/assets/platforms/threads.svg";
+import tiktokLogo from "@/assets/platforms/tiktok.svg";
+import xLogo from "@/assets/platforms/x.svg";
+import youtubeLogo from "@/assets/platforms/youtube.svg";
 import { optionLabel, SOCIAL_PLATFORM_OPTIONS } from "@/config/brandProfile";
 import { cn } from "@/lib/utils";
 import type { SocialPlatform } from "@/types/brandProfile";
 
-/** Brand-coloured monogram (the icon set has no brand logos). */
-const PLATFORM_STYLES: Record<SocialPlatform, { mark: string; className: string }> = {
-  LINKEDIN: { mark: "in", className: "bg-[#0a66c2]" },
-  INSTAGRAM: { mark: "IG", className: "bg-linear-to-br from-[#f58529] via-[#dd2a7b] to-[#8134af]" },
-  FACEBOOK: { mark: "f", className: "bg-[#1877f2]" },
-  X: { mark: "X", className: "bg-black" },
-  TIKTOK: { mark: "TT", className: "bg-slate-900" },
-  YOUTUBE: { mark: "YT", className: "bg-[#ff0000]" },
-  PINTEREST: { mark: "P", className: "bg-[#e60023]" },
-  THREADS: { mark: "@", className: "bg-slate-800" },
+/** Official full-colour platform logos (vector, via svgl.app). */
+const PLATFORM_LOGOS: Record<SocialPlatform, string> = {
+  LINKEDIN: linkedinLogo,
+  INSTAGRAM: instagramLogo,
+  FACEBOOK: facebookLogo,
+  X: xLogo,
+  TIKTOK: tiktokLogo,
+  YOUTUBE: youtubeLogo,
+  PINTEREST: pinterestLogo,
+  THREADS: threadsLogo,
 };
 
 interface PlatformBadgeProps {
@@ -21,19 +29,23 @@ interface PlatformBadgeProps {
 }
 
 function PlatformBadge({ platform, size = "md", className }: PlatformBadgeProps) {
-  const style = PLATFORM_STYLES[platform];
   return (
     <span
       role="img"
       aria-label={optionLabel(SOCIAL_PLATFORM_OPTIONS, platform)}
       className={cn(
-        "flex shrink-0 items-center justify-center rounded-lg font-bold text-white",
-        size === "sm" ? "size-7 text-[10px]" : "size-9 text-xs",
-        style.className,
+        "flex shrink-0 items-center justify-center rounded-lg border border-line bg-white",
+        size === "sm" ? "size-7" : "size-9",
         className,
       )}
     >
-      <span aria-hidden="true">{style.mark}</span>
+      <img
+        src={PLATFORM_LOGOS[platform]}
+        alt=""
+        aria-hidden="true"
+        draggable={false}
+        className="size-3/5 object-contain"
+      />
     </span>
   );
 }

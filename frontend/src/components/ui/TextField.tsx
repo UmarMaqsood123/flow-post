@@ -7,7 +7,10 @@ interface TextFieldProps extends ComponentProps<"input"> {
   hint?: string;
 }
 
-/** Labelled input with accessible error/hint wiring. Works with react-hook-form's `register`. */
+/**
+ * Labelled input with accessible error/hint wiring. Works with react-hook-form's `register`.
+ * Pass `required` to mark the label with an asterisk (forms using `noValidate` still validate via their schema).
+ */
 function TextField({ label, error, hint, id, className, ...props }: TextFieldProps) {
   const generatedId = useId();
   const inputId = id ?? generatedId;
@@ -18,6 +21,11 @@ function TextField({ label, error, hint, id, className, ...props }: TextFieldPro
     <div className={cn("flex flex-col gap-1.5", className)}>
       <label htmlFor={inputId} className="text-sm font-medium">
         {label}
+        {props.required && (
+          <span className="ml-0.5 text-danger" aria-hidden="true">
+            *
+          </span>
+        )}
       </label>
       <input
         id={inputId}

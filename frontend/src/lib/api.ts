@@ -48,7 +48,7 @@ const toApiError = (error: AxiosError<ApiErrorResponse>): ApiError => {
     );
   }
   const code = error.code === "ECONNABORTED" ? "TIMEOUT" : "NETWORK_ERROR";
-  return new ApiError("Unable to reach the server", 0, code);
+  return new ApiError("We couldn't reach the server", 0, code);
 };
 
 /** Clears client-side auth state. Route guards react by redirecting to login. */

@@ -6,6 +6,11 @@ import { getAuthenticatedUser } from "../utils/request.util";
 import { getWorkspaceContext } from "../utils/workspaceContext.util";
 import type { ConfirmCheckoutInput, PlanChoiceInput } from "../validators/billing.validator";
 
+export const GetPlans = (_req: Request, res: Response) => {
+  res.set("Cache-Control", "public, max-age=300");
+  sendSuccess(res, { message: "Plans", data: BillingService.getPlanCatalog() });
+};
+
 export const GetBilling = async (req: Request, res: Response) => {
   const overview = await BillingService.getOverview(getAuthenticatedUser(req));
   sendSuccess(res, { message: "Billing", data: overview });

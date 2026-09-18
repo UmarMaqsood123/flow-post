@@ -43,7 +43,7 @@ export const sendSuccess = <T>(
   return res.status(statusCode).json(body);
 };
 
-export const sendCreated = <T>(res: Response, data: T, message = "Created successfully") =>
+export const sendCreated = <T>(res: Response, data: T, message = "Created") =>
   sendSuccess(res, { data, message, statusCode: HttpStatus.CREATED });
 
 export const sendNoContent = (res: Response): Response => res.status(HttpStatus.NO_CONTENT).end();

@@ -77,7 +77,7 @@ function WorkspaceSettings() {
         <SettingsCard
           tone="danger"
           title="Archive workspace"
-          description="Archiving hides this workspace from every member and revokes pending invitations. Nothing is deleted — owners can restore it from the workspace switcher."
+          description="Archiving hides this workspace from every member and revokes pending invitations. Nothing is deleted, and owners can restore it from the workspace switcher."
         >
           <Button variant="danger" onClick={handleArchive} isLoading={archiveWorkspace.isPending}>
             Archive workspace

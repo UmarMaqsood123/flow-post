@@ -11,6 +11,7 @@ import Badge from "@/components/ui/Badge";
 import Button from "@/components/ui/Button";
 import Skeleton from "@/components/ui/Skeleton";
 import { formatFileSize } from "@/lib/files";
+import { planFeatureList } from "@/lib/plans";
 import { cn } from "@/lib/utils";
 import {
   useBilling,
@@ -176,19 +177,7 @@ function PlanCard({
   }
   if (unavailable || (blockedByPayment && option.plan !== "FREE")) disabled = true;
 
-  const limits = option.limits;
-  const features = [
-    `${limits.workspaces} ${limits.workspaces === 1 ? "workspace" : "workspaces"}`,
-    `${limits.socialAccountsPerWorkspace} social accounts per workspace`,
-    `${limits.aiGenerationsPerMonth.toLocaleString()} AI generations a month`,
-    `${limits.scheduledPostsPerMonth.toLocaleString()} scheduled posts a month`,
-    `${limits.teamMembersPerWorkspace} ${limits.teamMembersPerWorkspace === 1 ? "seat" : "seats"} per workspace`,
-    `${formatFileSize(limits.storageBytes)} media storage`,
-    option.features.analytics ? "Analytics and AI insights" : null,
-    option.features.autopilot
-      ? `Autopilot, up to ${option.autopilot.postsPerWeek} posts a week`
-      : null,
-  ].filter((item): item is string => Boolean(item));
+  const features = planFeatureList(option);
 
   return (
     <article

@@ -58,7 +58,7 @@ function RefineToolbar({
           </Button>
         ))}
         <Dropdown
-          ariaLabel="Tone for Change tone"
+          ariaLabel="Tone to change to"
           size="sm"
           className="w-40"
           options={toneOptions}

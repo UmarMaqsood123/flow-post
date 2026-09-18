@@ -16,6 +16,9 @@ import type {
   PublishingFailure,
   UsageInspection,
 } from "@/types/admin";
+import type { AdminContactMessage, ContactStatus } from "@/types/contact";
+
+export type ContactMessagesPage = Paged<AdminContactMessage> & { unread: number };
 
 /** Drops empty filters so URLs and cache keys stay tidy. */
 const toQuery = (params: Record<string, string | number | undefined>) => {
@@ -54,4 +57,15 @@ export const adminApi = {
   inspectUsage: (params: { userId?: string; workspaceId?: string }) =>
     get<UsageInspection>("/usage", params),
   auditLogs: (params: ListParams) => get<Paged<AuditLogRow>>("/audit-logs", params),
+  contactMessages: (params: ListParams) => get<ContactMessagesPage>("/contact-messages", params),
+  updateContactMessage: async (
+    id: string,
+    changes: { status?: ContactStatus; adminNote?: string | null },
+  ) =>
+    (
+      await api.patch<AdminContactMessage>(
+        `/admin/contact-messages/${encodeURIComponent(id)}`,
+        changes,
+      )
+    ).data,
 };

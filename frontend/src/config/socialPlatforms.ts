@@ -49,7 +49,7 @@ export const PLATFORM_DETAILS: Record<ConnectablePlatform, PlatformDetails> = {
     description: "Publish to an Instagram professional account linked to a Facebook Page.",
     supported: ["Photo posts", "Carousels of up to 10 items", "Reels"],
     unsupported: [
-      "Text-only posts — Instagram needs an image or video",
+      "Text-only posts (Instagram needs an image or video)",
       "Personal accounts, and scheduling without media",
       "Stories, and deleting published posts",
     ],
@@ -64,7 +64,7 @@ export const PLATFORM_DETAILS: Record<ConnectablePlatform, PlatformDetails> = {
     supported: ["Videos up to 10 minutes"],
     unsupported: [
       "Text-only posts",
-      "Photo posts \u2014 they need a verified media domain",
+      "Photo posts (these need a verified media domain)",
       "Deleting posts",
       "Public posts until TikTok audits the app",
     ],

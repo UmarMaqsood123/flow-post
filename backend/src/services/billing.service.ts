@@ -124,6 +124,17 @@ const publicSubscription = (subscription: IBillingSubscription | null) =>
       }
     : null;
 
+/** Every plan with its price, limits and which billing intervals can be bought. Public. */
+export const getPlanCatalog = () =>
+  PLANS.map((plan) => ({
+    plan,
+    ...PLAN_DEFINITIONS[plan],
+    intervals:
+      plan === "FREE"
+        ? []
+        : (["month", "year"] as const).filter((interval) => Boolean(PRICE_IDS[plan][interval])),
+  }));
+
 export const getOverview = async (user: UserDocument) => {
   const account = await BillingAccount.findOne({ user: user._id });
   const resolution = EntitlementService.resolvePlan(account);
@@ -153,14 +164,7 @@ export const getOverview = async (user: UserDocument) => {
       id: workspace._id.toString(),
       name: workspace.name,
     })),
-    plans: PLANS.map((plan) => ({
-      plan,
-      ...PLAN_DEFINITIONS[plan],
-      intervals:
-        plan === "FREE"
-          ? []
-          : (["month", "year"] as const).filter((interval) => Boolean(PRICE_IDS[plan][interval])),
-    })),
+    plans: getPlanCatalog(),
   };
 };
 

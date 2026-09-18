@@ -1,3 +1,4 @@
+import type { Plan } from "@/types/billing";
 import {
   CalendarDays,
   Clock,
@@ -14,10 +15,10 @@ import {
 /** Landing page copy and data. Edit content here rather than in the components. */
 
 export const navLinks = [
-  { label: "Features", href: "#features" },
-  { label: "How it works", href: "#how-it-works" },
-  { label: "Pricing", href: "#pricing" },
-  { label: "FAQ", href: "#faq" },
+  { label: "Features", href: "/#features" },
+  { label: "How it works", href: "/#how-it-works" },
+  { label: "Pricing", href: "/#pricing" },
+  { label: "FAQ", href: "/#faq" },
 ] as const;
 
 export const platforms = [
@@ -72,7 +73,7 @@ export const features: IconItem[] = [
   },
   {
     icon: ShieldCheck,
-    title: "Secure by design",
+    title: "Account security",
     description:
       "Modern password hashing, short-lived sessions and email verification keep your accounts protected.",
   },
@@ -103,58 +104,28 @@ export const showcasePoints = [
   "Reschedule or edit a post without leaving the calendar",
 ];
 
-export interface PricingPlan {
-  name: string;
-  /** Monthly price in USD. */
-  price: number;
-  description: string;
-  features: string[];
-  cta: string;
-  highlighted?: boolean;
-}
-
-// TODO(pricing): placeholder plans — align names, limits and prices with the Stripe products before launch.
-export const pricingPlans: PricingPlan[] = [
-  {
-    name: "Starter",
-    price: 0,
-    description: "For individuals getting started with consistent posting.",
-    features: [
-      "3 connected social accounts",
-      "30 AI-generated posts per month",
-      "Content calendar",
-      "Scheduled publishing",
-    ],
+/** Marketing copy for each plan. Prices and limits come from the API (GET /plans). */
+export const planMarketing: Record<Plan, { description: string; cta: string }> = {
+  FREE: {
+    description: "For trying FlowPost out and posting now and then.",
     cta: "Start free",
   },
-  {
-    name: "Pro",
-    price: 29,
-    description: "For creators and small businesses posting every day.",
-    features: [
-      "10 connected social accounts",
-      "500 AI-generated posts per month",
-      "Brand voice settings",
-      "Caption and hashtag suggestions",
-      "Everything in Starter",
-    ],
+  CREATOR: {
+    description: "For solo creators who post a few times a week.",
+    cta: "Start with Creator",
+  },
+  PRO: {
+    description: "For small businesses posting daily across several accounts.",
     cta: "Start with Pro",
-    highlighted: true,
   },
-  {
-    name: "Business",
-    price: 79,
-    description: "For teams managing several brands at once.",
-    features: [
-      "25 connected social accounts",
-      "2,000 AI-generated posts per month",
-      "Multiple brands",
-      "Priority support",
-      "Everything in Pro",
-    ],
-    cta: "Start with Business",
+  AGENCY: {
+    description: "For agencies and teams running lots of brands.",
+    cta: "Start with Agency",
   },
-];
+};
+
+/** Gets the "Most popular" label on the pricing page. */
+export const highlightedPlan: Plan = "PRO";
 
 export const faqs = [
   {

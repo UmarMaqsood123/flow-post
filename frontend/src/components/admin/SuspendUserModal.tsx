@@ -34,7 +34,7 @@ function SuspendUserModal({ user, open, onClose }: SuspendUserModalProps) {
         <div className="flex flex-col gap-3">
           <p>
             {action === "suspend"
-              ? "They're signed out everywhere straight away and can't sign in. Autopilot stops acting as them. Their workspaces, posts and schedules are left alone."
+              ? "They're signed out everywhere right away and can't sign back in. Autopilot stops acting as them. Their workspaces, posts and schedules are left alone."
               : "They'll be able to sign in again. Sessions ended by the suspension stay ended."}
           </p>
           <TextAreaField

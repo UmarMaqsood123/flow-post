@@ -40,6 +40,8 @@ export const useAdminPublishingFailures = (params: ListParams) =>
   useList("publishing-failures", adminApi.publishingFailures, params);
 export const useAdminAuditLogs = (params: ListParams) =>
   useList("audit-logs", adminApi.auditLogs, params);
+export const useAdminContactMessages = (params: ListParams) =>
+  useList("contact-messages", adminApi.contactMessages, params);
 export const useAdminAIUsage = (params: ListParams) =>
   useList("ai-usage", adminApi.aiUsage, params);
 export const useAdminPlans = () =>
@@ -83,5 +85,18 @@ export function useSuspendUser(id: string) {
         queryClient.invalidateQueries({ queryKey: queryKeys.admin.dashboard() }),
       ]);
     },
+  });
+}
+
+export function useUpdateContactMessage() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      ...changes
+    }: { id: string } & Parameters<typeof adminApi.updateContactMessage>[1]) =>
+      adminApi.updateContactMessage(id, changes),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: [...queryKeys.admin.lists(), "contact-messages"] }),
   });
 }

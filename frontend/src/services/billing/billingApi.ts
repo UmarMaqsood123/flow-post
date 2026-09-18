@@ -4,10 +4,13 @@ import type {
   BillingOverview,
   PaidPlan,
   PlanChangeResult,
+  PlanOption,
   WorkspaceEntitlements,
 } from "@/types/billing";
 
 export const billingApi = {
+  /** Public plan catalog: works signed out, so no session refresh. */
+  plans: async () => (await api.get<PlanOption[]>("/plans", { skipAuthRefresh: true })).data,
   overview: async () => (await api.get<BillingOverview>("/billing")).data,
   refresh: async () => (await api.post<BillingOverview>("/billing/refresh")).data,
   checkout: async (plan: PaidPlan, interval: BillingInterval) =>

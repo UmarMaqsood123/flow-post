@@ -47,6 +47,8 @@ function Login() {
 
         <TextField
           label="Email"
+          required
+          placeholder="you@example.com"
           type="email"
           autoComplete="email"
           error={errors.email?.message}
@@ -56,6 +58,8 @@ function Login() {
         <div className="flex flex-col gap-2">
           <TextField
             label="Password"
+            required
+            placeholder="Enter your password"
             type="password"
             autoComplete="current-password"
             error={errors.password?.message}

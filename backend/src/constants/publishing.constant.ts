@@ -52,7 +52,7 @@ export const PUBLISH_QUEUE_NAME = "publish-post";
  * answer never arrived (crash, timeout), so republishing might post twice.
  */
 export const NEEDS_REVIEW_MESSAGE =
-  "We started publishing but never got an answer from the platform. Check the account before trying again — the post may already be live.";
+  "We started publishing but never got an answer from the platform. The post may already be live, so check the account before trying again.";
 
 export const PUBLISHING_LIMITS = {
   /** How far ahead a post can be scheduled. */

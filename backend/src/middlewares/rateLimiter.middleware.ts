@@ -172,6 +172,15 @@ export const workspaceRateLimiters = {
   }),
 };
 
+/** Public Contact form: enough for a real conversation, not enough for spam. */
+export const contactRateLimiter = createRateLimiter({
+  name: "contact",
+  windowMs: HOUR_MS,
+  limit: 5,
+  keyGenerator: ipKey,
+  message: "You've sent a few messages already. Please try again in an hour.",
+});
+
 /** Admin panel requests, per admin. Generous, but bounds a leaked session. */
 export const adminRateLimiter = createRateLimiter({
   name: "admin",

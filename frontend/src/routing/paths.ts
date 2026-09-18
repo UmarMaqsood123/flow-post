@@ -1,6 +1,10 @@
 /** Single source of truth for route paths. */
 export const paths = {
   home: "/",
+  about: "/about",
+  contact: "/contact",
+  terms: "/terms",
+  privacy: "/privacy",
   login: "/login",
   signup: "/signup",
   forgotPassword: "/forgot-password",
@@ -40,6 +44,7 @@ export const paths = {
   adminSocialConnections: "/admin/social-connections",
   adminPublishingFailures: "/admin/publishing-failures",
   adminAuditLog: "/admin/audit-log",
+  adminContactMessages: "/admin/messages",
   createWorkspace: "/workspaces/new",
   /** Legacy path — redirects to account settings. */
   changePassword: "/settings/password",

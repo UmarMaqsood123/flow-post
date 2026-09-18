@@ -7,6 +7,15 @@ export function useBilling() {
   return useQuery({ queryKey: queryKeys.billing.overview(), queryFn: billingApi.overview });
 }
 
+/** Public plan catalog for the pricing section. Plans rarely change, so it's cached a while. */
+export function usePlans() {
+  return useQuery({
+    queryKey: queryKeys.billing.plans(),
+    queryFn: billingApi.plans,
+    staleTime: 10 * 60_000,
+  });
+}
+
 export function useWorkspaceEntitlements(workspaceId: string | undefined) {
   return useQuery({
     queryKey: queryKeys.workspaces.entitlements(workspaceId ?? ""),

@@ -175,7 +175,7 @@ function Dashboard() {
     },
     {
       label: "Invite a teammate",
-      description: "Bring in admins, editors or viewers to collaborate.",
+      description: "Invite admins, editors or viewers to work with you.",
       done: (members.data?.length ?? 0) > 1 || (invitations.data?.length ?? 0) > 0,
       action: isAdmin ? (
         <Link to={paths.workspaceMembers} className={smallButton("secondary")}>

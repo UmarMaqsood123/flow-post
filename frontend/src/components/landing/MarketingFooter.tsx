@@ -5,12 +5,22 @@ import { navLinks } from "@/config/landing";
 import { paths } from "@/routing/paths";
 import Container from "./Container";
 
+const companyLinks = [
+  { label: "About", to: paths.about },
+  { label: "Contact us", to: paths.contact },
+];
+
+const legalLinks = [
+  { label: "Terms & Conditions", to: paths.terms },
+  { label: "Privacy Policy", to: paths.privacy },
+];
+
 const linkClass = "text-sm text-muted transition-colors hover:text-ink";
 
 function MarketingFooter() {
   return (
     <footer className="border-t border-line">
-      <Container className="grid gap-10 py-12 sm:grid-cols-[2fr_1fr_1fr]">
+      <Container className="grid gap-10 py-12 sm:grid-cols-2 lg:grid-cols-[2fr_1fr_1fr_1fr]">
         <div className="max-w-xs">
           <Logo />
           <p className="mt-4 text-sm text-muted">
@@ -48,20 +58,39 @@ function MarketingFooter() {
                 Sign up
               </Link>
             </li>
-            <li>
-              <Link to={paths.forgotPassword} className={linkClass}>
-                Reset password
-              </Link>
-            </li>
+          </ul>
+        </nav>
+
+        <nav aria-labelledby="footer-company">
+          <h2 id="footer-company" className="text-sm font-semibold">
+            Company
+          </h2>
+          <ul className="mt-4 flex flex-col gap-3">
+            {companyLinks.map((link) => (
+              <li key={link.to}>
+                <Link to={link.to} className={linkClass}>
+                  {link.label}
+                </Link>
+              </li>
+            ))}
           </ul>
         </nav>
       </Container>
 
       <div className="border-t border-line">
-        <Container className="py-6">
+        <Container className="flex flex-col gap-3 py-6 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-sm text-muted">
             © {new Date().getFullYear()} {env.appName}. All rights reserved.
           </p>
+          <ul className="flex flex-wrap gap-x-6 gap-y-2">
+            {legalLinks.map((link) => (
+              <li key={link.to}>
+                <Link to={link.to} className={linkClass}>
+                  {link.label}
+                </Link>
+              </li>
+            ))}
+          </ul>
         </Container>
       </div>
     </footer>

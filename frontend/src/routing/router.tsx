@@ -12,6 +12,7 @@ import Signup from "@/pages/auth/Signup";
 import VerifyEmail from "@/pages/auth/VerifyEmail";
 import AdminAIUsage from "@/pages/admin/AdminAIUsage";
 import AdminAuditLog from "@/pages/admin/AdminAuditLog";
+import AdminContactMessages from "@/pages/admin/AdminContactMessages";
 import AdminDashboard from "@/pages/admin/AdminDashboard";
 import AdminPlans from "@/pages/admin/AdminPlans";
 import AdminPublishingFailures from "@/pages/admin/AdminPublishingFailures";
@@ -30,6 +31,10 @@ import Content from "@/pages/content/Content";
 import AICreate from "@/pages/create/AICreate";
 import Dashboard from "@/pages/dashboard/Dashboard";
 import Home from "@/pages/Home";
+import About from "@/pages/marketing/About";
+import Contact from "@/pages/marketing/Contact";
+import Privacy from "@/pages/marketing/Privacy";
+import Terms from "@/pages/marketing/Terms";
 import AcceptInvitation from "@/pages/invitations/AcceptInvitation";
 import NotFound from "@/pages/NotFound";
 import AccountSettings from "@/pages/settings/AccountSettings";
@@ -63,10 +68,16 @@ export const router = createBrowserRouter([
       {
         path: paths.home,
         element: <MarketingLayout />,
-        children: [{ index: true, element: <Home /> }],
+        children: [
+          { index: true, element: <Home /> },
+          { path: paths.about, element: <About /> },
+          { path: paths.contact, element: <Contact /> },
+          { path: paths.terms, element: <Terms /> },
+          { path: paths.privacy, element: <Privacy /> },
+        ],
       },
 
-      // Auth pages and email links (simple header)
+      // Auth pages and email links (no header)
       {
         element: <RootLayout />,
         children: [
@@ -176,6 +187,11 @@ export const router = createBrowserRouter([
                     path: paths.adminPublishingFailures,
                     element: <AdminPublishingFailures />,
                     handle: titled("Admin · Publishing failures"),
+                  },
+                  {
+                    path: paths.adminContactMessages,
+                    element: <AdminContactMessages />,
+                    handle: titled("Admin · Messages"),
                   },
                   {
                     path: paths.adminAuditLog,

@@ -16,6 +16,10 @@ import {
   reactivateUserSchema,
   suspendUserSchema,
 } from "../validators/admin.validator";
+import {
+  listContactMessagesQuerySchema,
+  updateContactMessageSchema,
+} from "../validators/contact.validator";
 
 /**
  * /api/v1/admin: the super admin panel. The role is re-read from the database on
@@ -76,6 +80,17 @@ AdminRouter.get(
   "/audit-logs",
   validate({ query: listAuditLogsQuerySchema }),
   AdminController.ListAuditLogs,
+);
+
+AdminRouter.get(
+  "/contact-messages",
+  validate({ query: listContactMessagesQuerySchema }),
+  AdminController.ListContactMessages,
+);
+AdminRouter.patch(
+  "/contact-messages/:id",
+  validate({ params, body: updateContactMessageSchema }),
+  AdminController.UpdateContactMessage,
 );
 
 export { AdminRouter };

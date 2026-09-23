@@ -15,6 +15,7 @@ import { runAutopilotSweep } from "./services/autopilot.service";
 import { reconcileSubscriptions } from "./services/billing.service";
 import { generateDueReports } from "./services/performanceInsights.service";
 import { recoverPublishing } from "./services/publishing.service";
+import { refreshExpiringTokens } from "./services/socialAccount.service";
 import { registerGracefulShutdown } from "./utils/gracefulShutdown.util";
 import { closeWorkers, getWorkerCount, getWorkers, registerWorkers } from "./workers";
 
@@ -98,6 +99,26 @@ const bootstrap = async () => {
   const autopilotTimer = setInterval(autopilot, env.AUTOPILOT_SWEEP_INTERVAL_MS);
   autopilotTimer.unref();
 
+  // Some platforms' tokens (Instagram Login) can't be renewed once they lapse,
+  // so accounts that rarely post are refreshed ahead of time.
+  let refreshingTokens = false;
+  const refreshTokens = () => {
+    if (refreshingTokens) return;
+    refreshingTokens = true;
+    void refreshExpiringTokens()
+      .then(({ refreshed, failed }) => {
+        if (refreshed > 0 || failed > 0)
+          logger.info({ refreshed, failed }, "Social tokens refreshed");
+      })
+      .catch((error: unknown) => logger.error({ err: error }, "Social token refresh failed"))
+      .finally(() => {
+        refreshingTokens = false;
+      });
+  };
+  refreshTokens();
+  const tokenRefreshTimer = setInterval(refreshTokens, env.SOCIAL_TOKEN_REFRESH_INTERVAL_MS);
+  tokenRefreshTimer.unref();
+
   // Webhooks keep subscriptions current; this catches any that were missed.
   const reconcile = () => {
     void reconcileSubscriptions()
@@ -113,6 +134,7 @@ const bootstrap = async () => {
     "Worker",
     async () => {
       clearInterval(billingTimer);
+      clearInterval(tokenRefreshTimer);
       clearInterval(autopilotTimer);
       clearInterval(analyticsTimer);
       clearInterval(recoveryTimer);

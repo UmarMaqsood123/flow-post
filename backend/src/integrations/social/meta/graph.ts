@@ -1,9 +1,11 @@
 /**
  * Shared Meta Graph API plumbing for the Facebook and Instagram providers.
  *
- * Both publish through graph.facebook.com with a token obtained by Facebook
- * Login, so the request, error and pagination handling live here once. Nothing
- * in this file is platform-specific beyond the `platform` passed in for errors.
+ * Facebook, and Instagram through Facebook Login, go to graph.facebook.com.
+ * Instagram through Instagram Login goes to graph.instagram.com, which speaks
+ * the same request and error format. So request, error and pagination handling
+ * live here once. Nothing in this file is platform-specific beyond the
+ * `platform` passed in for errors.
  *
  * Docs: https://developers.facebook.com/docs/graph-api/
  */
@@ -15,6 +17,10 @@ export const GRAPH_HOST = "https://graph.facebook.com";
 /** Uploads for resumable video go to their own host. */
 export const RUPLOAD_HOST = "https://rupload.facebook.com";
 export const FACEBOOK_DIALOG_HOST = "https://www.facebook.com";
+/** Instagram API with Instagram Login: consent, code exchange and API calls. */
+export const INSTAGRAM_GRAPH_HOST = "https://graph.instagram.com";
+export const INSTAGRAM_OAUTH_HOST = "https://api.instagram.com";
+export const INSTAGRAM_DIALOG_HOST = "https://www.instagram.com";
 
 /** Shape of the `error` object Meta returns on failure. */
 interface GraphError {
@@ -144,6 +150,8 @@ export const toGraphError = (
 
 export interface GraphClientConfig {
   version: string;
+  /** Defaults to graph.facebook.com. */
+  host?: string;
   fetch: FetchLike;
   timeoutMs?: number;
 }
@@ -166,8 +174,9 @@ export interface GraphRequest {
  */
 const TRUSTED_GRAPH_HOSTS = new Set([
   new URL(GRAPH_HOST).hostname,
-  "graph.facebook.com",
-  "graph.instagram.com",
+  new URL(INSTAGRAM_GRAPH_HOST).hostname,
+  // Only the Instagram Login code exchange goes here.
+  new URL(INSTAGRAM_OAUTH_HOST).hostname,
 ]);
 
 export class GraphClient {
@@ -183,7 +192,7 @@ export class GraphClient {
   url(path: string, query: GraphRequest["query"] = {}): string {
     const base = path.startsWith("https://")
       ? path
-      : `${GRAPH_HOST}/${this.config.version}${path.startsWith("/") ? path : `/${path}`}`;
+      : `${this.config.host ?? GRAPH_HOST}/${this.config.version}${path.startsWith("/") ? path : `/${path}`}`;
     const url = new URL(base);
     // Absolute URLs come from API responses (paging links). The access token goes
     // with every request, so only Meta's own Graph hosts are ever called.

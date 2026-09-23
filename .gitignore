@@ -28,3 +28,6 @@ Thumbs.db
 # Secrets (e.g. OCI API signing keys)
 secrets/
 *.pem
+
+# Deployment backups
+deploy/backups/

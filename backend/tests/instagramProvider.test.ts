@@ -304,3 +304,246 @@ describe("Instagram publishing", () => {
     expect(() => new SocialProviderRegistry([createProvider(fetch)])).not.toThrow();
   });
 });
+
+describe("Instagram Login (no Facebook Page)", () => {
+  const IG_TOKEN = "ig-long-lived-token";
+  const igCredentials: ProviderCredentials = {
+    accessToken: IG_TOKEN,
+    providerAccountId: IG_ID,
+    metadata: { loginMethod: "instagram" },
+  };
+
+  const createIgProvider = (fetch: FetchLike, overrides = {}) =>
+    createProvider(fetch, {
+      instagramAppId: "ig-app-456",
+      instagramAppSecret: "ig-app-secret",
+      ...overrides,
+    });
+
+  const loginRoutes = (overrides: { permissions?: string; accountType?: string } = {}) => [
+    route("POST", "/oauth/access_token", () =>
+      json(200, {
+        data: [
+          {
+            access_token: "ig-short-token",
+            user_id: IG_ID,
+            permissions:
+              overrides.permissions ??
+              "instagram_business_basic,instagram_business_content_publish,instagram_business_manage_insights",
+          },
+        ],
+      }),
+    ),
+    route("GET", "/access_token", () =>
+      json(200, { access_token: IG_TOKEN, token_type: "bearer", expires_in: 5_184_000 }),
+    ),
+    route("GET", "/me", () =>
+      json(200, {
+        id: "app-scoped-1",
+        user_id: IG_ID,
+        username: "acmecoffee",
+        name: "Acme Coffee",
+        profile_picture_url: "https://cdn.instagram.test/acme.jpg",
+        account_type: overrides.accountType ?? "BUSINESS",
+      }),
+    ),
+  ];
+
+  it("offers Instagram Login first when it's configured", () => {
+    const { fetch } = fakeGraph([]);
+    expect(createIgProvider(fetch).listLoginMethods()).toEqual([
+      { id: "instagram", label: "Instagram", available: true },
+      { id: "facebook", label: "Facebook Page", available: true },
+    ]);
+    expect(
+      createIgProvider(fetch, { appId: undefined, appSecret: undefined }).listLoginMethods(),
+    ).toEqual([
+      { id: "instagram", label: "Instagram", available: true },
+      { id: "facebook", label: "Facebook Page", available: false },
+    ]);
+  });
+
+  it("is available with only the Instagram app credentials", () => {
+    const { fetch } = fakeGraph([]);
+    const provider = createIgProvider(fetch, { appId: undefined, appSecret: undefined });
+    expect(provider.isAvailable()).toBe(true);
+  });
+
+  it("sends the user to Instagram's own consent page with the business scopes", async () => {
+    const { fetch } = fakeGraph([]);
+    const { url } = await createIgProvider(fetch).getAuthorizationUrl({
+      state: "state-1",
+      redirectUri: "https://app.flowpost.test/cb",
+      loginMethod: "instagram",
+    });
+
+    const parsed = new URL(url);
+    expect(parsed.origin + parsed.pathname).toBe("https://www.instagram.com/oauth/authorize");
+    expect(parsed.searchParams.get("client_id")).toBe("ig-app-456");
+    expect(parsed.searchParams.get("state")).toBe("state-1");
+    expect(parsed.searchParams.get("scope")).toBe(
+      "instagram_business_basic,instagram_business_content_publish,instagram_business_manage_insights",
+    );
+  });
+
+  it("still uses Facebook Login when asked for it", async () => {
+    const { fetch } = fakeGraph([]);
+    const { url } = await createIgProvider(fetch).getAuthorizationUrl({
+      state: "s",
+      redirectUri: "https://app.flowpost.test/cb",
+      loginMethod: "facebook",
+    });
+    expect(new URL(url).origin).toBe("https://www.facebook.com");
+  });
+
+  it("rejects a login method it doesn't know", async () => {
+    const { fetch } = fakeGraph([]);
+    await expect(
+      createIgProvider(fetch).getAuthorizationUrl({
+        state: "s",
+        redirectUri: "https://x.test/cb",
+        loginMethod: "myspace",
+      }),
+    ).rejects.toMatchObject({ kind: "INVALID_REQUEST" });
+  });
+
+  it("exchanges the code for a 60-day token and connects that one account", async () => {
+    const { fetch, requests } = fakeGraph(loginRoutes());
+
+    const connection = await createIgProvider(fetch).handleOAuthCallback({
+      code: "code-1",
+      redirectUri: "https://app.flowpost.test/cb",
+      loginMethod: "instagram",
+    });
+
+    const [exchange, longLived, me] = requests;
+    expect(exchange.url.origin).toBe("https://api.instagram.com");
+    expect(formBody(exchange)).toEqual({
+      client_id: "ig-app-456",
+      client_secret: "ig-app-secret",
+      grant_type: "authorization_code",
+      redirect_uri: "https://app.flowpost.test/cb",
+      code: "code-1",
+    });
+    expect(longLived.url.origin).toBe("https://graph.instagram.com");
+    expect(longLived.url.searchParams.get("grant_type")).toBe("ig_exchange_token");
+    expect(longLived.url.searchParams.get("access_token")).toBe("ig-short-token");
+    expect(me.url.origin).toBe("https://graph.instagram.com");
+    expect(me.headers.get("authorization")).toBe(`Bearer ${IG_TOKEN}`);
+
+    const expiresAt = new Date(NOW.getTime() + 5_184_000 * 1000);
+    expect(connection.singleAccount).toBe(true);
+    expect(connection.tokens).toEqual({
+      accessToken: IG_TOKEN,
+      // Instagram refreshes a token by presenting the token itself.
+      refreshToken: IG_TOKEN,
+      expiresAt,
+      refreshTokenExpiresAt: expiresAt,
+      scopes: [
+        "instagram_business_basic",
+        "instagram_business_content_publish",
+        "instagram_business_manage_insights",
+      ],
+    });
+    expect(connection.profile).toEqual({
+      providerAccountId: IG_ID,
+      accountName: "Acme Coffee",
+      username: "acmecoffee",
+      profileImage: "https://cdn.instagram.test/acme.jpg",
+      metadata: { accountType: "business", loginMethod: "instagram" },
+    });
+  });
+
+  it("also reads the flat token response the endpoint has historically returned", async () => {
+    const routes = loginRoutes();
+    routes[0] = route("POST", "/oauth/access_token", () =>
+      json(200, { access_token: "ig-short-token", user_id: 17841400000 }),
+    );
+    const { fetch } = fakeGraph(routes);
+
+    const connection = await createIgProvider(fetch).handleOAuthCallback({
+      code: "c",
+      redirectUri: "https://x.test/cb",
+      loginMethod: "instagram",
+    });
+    expect(connection.tokens.accessToken).toBe(IG_TOKEN);
+  });
+
+  it("refuses a login that didn't grant publishing", async () => {
+    const { fetch } = fakeGraph(loginRoutes({ permissions: "instagram_business_basic" }));
+    await expect(
+      createIgProvider(fetch).handleOAuthCallback({
+        code: "c",
+        redirectUri: "https://x.test/cb",
+        loginMethod: "instagram",
+      }),
+    ).rejects.toMatchObject({ kind: "PERMISSION_DENIED" });
+  });
+
+  it("explains that personal accounts have to switch to professional", async () => {
+    const { fetch } = fakeGraph(loginRoutes({ accountType: "PERSONAL" }));
+    await expect(
+      createIgProvider(fetch).handleOAuthCallback({
+        code: "c",
+        redirectUri: "https://x.test/cb",
+        loginMethod: "instagram",
+      }),
+    ).rejects.toMatchObject({
+      kind: "PERMISSION_DENIED",
+      message: expect.stringContaining("Business or Creator"),
+    });
+  });
+
+  it("publishes through graph.instagram.com with the Instagram token", async () => {
+    const { fetch, requests } = fakeGraph(publishingRoutes());
+
+    await createIgProvider(fetch).publishImage(igCredentials, { images: [image()] });
+
+    expect(requests.length).toBeGreaterThan(0);
+    for (const request of requests) {
+      expect(request.url.origin).toBe("https://graph.instagram.com");
+      expect(request.headers.get("authorization")).toBe(`Bearer ${IG_TOKEN}`);
+    }
+  });
+
+  it("keeps Facebook Login accounts on graph.facebook.com", async () => {
+    const { fetch, requests } = fakeGraph(publishingRoutes());
+    await createIgProvider(fetch).publishImage(credentials, { images: [image()] });
+    for (const request of requests) {
+      expect(request.url.origin).toBe("https://graph.facebook.com");
+    }
+  });
+
+  it("refreshes the token and asks for it to be renewed well before it expires", async () => {
+    const { fetch, requests } = fakeGraph([
+      route("GET", "/refresh_access_token", () =>
+        json(200, { access_token: "ig-renewed", token_type: "bearer", expires_in: 5_184_000 }),
+      ),
+    ]);
+    const provider = createIgProvider(fetch);
+
+    const tokens = await provider.refreshAccessToken(IG_TOKEN);
+
+    expect(requests[0].url.origin).toBe("https://graph.instagram.com");
+    expect(requests[0].url.searchParams.get("grant_type")).toBe("ig_refresh_token");
+    expect(tokens).toMatchObject({ accessToken: "ig-renewed", refreshToken: "ig-renewed" });
+    expect(provider.oauth.refreshBeforeExpiryMs).toBeGreaterThanOrEqual(7 * 24 * 60 * 60_000);
+  });
+
+  it("asks for a reconnect when Instagram won't refresh the token", async () => {
+    const { fetch } = fakeGraph([
+      route("GET", "/refresh_access_token", () =>
+        graphError(400, { code: 100, message: "Invalid token" }),
+      ),
+    ]);
+    await expect(createIgProvider(fetch).refreshAccessToken(IG_TOKEN)).rejects.toMatchObject({
+      kind: "REAUTH_REQUIRED",
+    });
+  });
+
+  it("checks the connection against the same account id it stored", async () => {
+    const { fetch } = fakeGraph(loginRoutes().slice(2));
+    const profile = await createIgProvider(fetch).getProfile(igCredentials);
+    expect(profile.providerAccountId).toBe(IG_ID);
+  });
+});

@@ -18,6 +18,8 @@ export interface ISocialOAuthState {
   redirectUri: string;
   /** PKCE verifier, encrypted. */
   encryptedCodeVerifier: string | null;
+  /** For platforms with several ways to sign in (Instagram), the one this flow uses. */
+  loginMethod: string | null;
   expiresAt: Date;
   consumedAt: Date | null;
   createdAt: Date;
@@ -35,6 +37,7 @@ const SocialOAuthStateSchema = new Schema<ISocialOAuthState>(
     bindingHash: { type: String, required: true, select: false },
     redirectUri: { type: String, required: true, maxlength: 2048 },
     encryptedCodeVerifier: { type: String, default: null, select: false },
+    loginMethod: { type: String, default: null, maxlength: 32 },
     expiresAt: { type: Date, required: true },
     consumedAt: { type: Date, default: null },
   },

@@ -16,6 +16,10 @@ export interface ISocialConnectionDraft {
   platform: SocialPlatformValue;
   /** The user access token from the callback, encrypted at rest. */
   encryptedAccessToken: string;
+  /** Kept for platforms whose chosen account uses the login's own token (LinkedIn Pages). */
+  encryptedRefreshToken: string | null;
+  tokenExpiresAt: Date | null;
+  refreshTokenExpiresAt: Date | null;
   scopes: string[];
   /** Accounts the authorization could connect, as shown in the picker. */
   targets: {
@@ -49,6 +53,9 @@ const SocialConnectionDraftSchema = new Schema<ISocialConnectionDraft>(
     user: { type: Schema.Types.ObjectId, ref: "User", required: true },
     platform: { type: String, enum: SOCIAL_PLATFORMS, required: true },
     encryptedAccessToken: { type: String, required: true, select: false },
+    encryptedRefreshToken: { type: String, default: null, select: false },
+    tokenExpiresAt: { type: Date, default: null },
+    refreshTokenExpiresAt: { type: Date, default: null },
     scopes: { type: [String], default: [] },
     targets: { type: [TargetSchema], default: [] },
     expiresAt: { type: Date, required: true },

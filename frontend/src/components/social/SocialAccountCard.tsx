@@ -69,7 +69,10 @@ function SocialAccountCard({
   const accessLabel = accessNeedsReconnect ? "Reconnect required" : expiry.label;
 
   const [isDisconnectOpen, setIsDisconnectOpen] = useState(false);
-  const revokeHint = PLATFORM_DETAILS[account.platform].revokeHint;
+  const platformDetails = PLATFORM_DETAILS[account.platform];
+  const revokeHint =
+    (account.loginMethod && platformDetails.loginMethods?.[account.loginMethod]?.revokeHint) ||
+    platformDetails.revokeHint;
 
   const handleDisconnect = () => {
     disconnect.reset();

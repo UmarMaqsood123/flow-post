@@ -181,7 +181,12 @@ describe("LinkedIn OAuth", () => {
       accountName: "John Doe",
       username: null,
       profileImage: "https://media.licdn.com/p.jpg",
-      metadata: { accountType: "member", authorUrn: "urn:li:person:782bbtaQ", locale: "en-US" },
+      metadata: {
+        accountType: "member",
+        loginMethod: "profile",
+        authorUrn: "urn:li:person:782bbtaQ",
+        locale: "en-US",
+      },
     });
   });
 
@@ -463,5 +468,238 @@ describe("LinkedIn provider contract", () => {
     expect(escapeLittleText("#launch day (beta) @ C# a_b ~ok~ [x]{y}<z>|\\")).toBe(
       "#launch day \\(beta\\) \\@ C\\# a\\_b \\~ok\\~ \\[x\\]\\{y\\}\\<z\\>\\|\\\\",
     );
+  });
+});
+
+describe("LinkedIn Company Pages", () => {
+  const PAGES_REDIRECT = "https://app.flowpost.test/api/v1/social-accounts/linkedin/callback";
+
+  const createPagesProvider = (fetch: FetchLike, overrides = {}) =>
+    createProvider(fetch, {
+      pagesClientId: "pages-client",
+      pagesClientSecret: "pages-secret",
+      ...overrides,
+    });
+
+  const pageCredentials: ProviderCredentials = {
+    accessToken: ACCESS_TOKEN,
+    providerAccountId: "2414183",
+    metadata: { loginMethod: "pages", authorUrn: "urn:li:organization:2414183" },
+  };
+
+  const aclRoute = (elements: unknown[]): Route => ({
+    method: "GET",
+    match: (url) => url.pathname === "/rest/organizationAcls",
+    respond: () => json(200, { elements, paging: { start: 0, count: 100 } }),
+  });
+
+  const organizationsRoute = (results: Record<string, unknown>): Route => ({
+    method: "GET",
+    match: (url) => url.pathname === "/rest/organizations",
+    respond: () => json(200, { results, statuses: {}, errors: {} }),
+  });
+
+  const pagesTokenRoute = (scope = "rw_organization_admin,w_organization_social") =>
+    tokenRoute(() => json(200, { access_token: ACCESS_TOKEN, expires_in: 5184000, scope }));
+
+  const acl = (organization: string, role = "ADMINISTRATOR", state = "APPROVED") => ({
+    role,
+    state,
+    roleAssignee: "urn:li:person:782bbtaQ",
+    organization,
+  });
+
+  it("offers profiles and Pages as separate ways in", () => {
+    const { fetch } = fakeLinkedIn([]);
+    expect(createPagesProvider(fetch).listLoginMethods()).toEqual([
+      { id: "profile", label: "Personal profile", available: true },
+      { id: "pages", label: "Company Page", available: true },
+    ]);
+    expect(createProvider(fetch).listLoginMethods()[1]).toMatchObject({ available: false });
+    // Pages alone are enough to make LinkedIn available.
+    expect(
+      createPagesProvider(fetch, { clientId: undefined, clientSecret: undefined }).isAvailable(),
+    ).toBe(true);
+  });
+
+  it("signs in to the Pages app with the Community Management scopes", async () => {
+    const { fetch } = fakeLinkedIn([]);
+    const { url } = await createPagesProvider(fetch).getAuthorizationUrl({
+      state: "s",
+      redirectUri: PAGES_REDIRECT,
+      loginMethod: "pages",
+    });
+    const parsed = new URL(url);
+    expect(parsed.searchParams.get("client_id")).toBe("pages-client");
+    expect(parsed.searchParams.get("scope")).toBe("rw_organization_admin w_organization_social");
+  });
+
+  it("exchanges the code with the Pages app and finds the Pages the member can post to", async () => {
+    const { fetch, requests } = fakeLinkedIn([
+      pagesTokenRoute(),
+      aclRoute([
+        acl("urn:li:organization:2414183"),
+        acl("urn:li:organization:555", "CONTENT_ADMINISTRATOR"),
+        // Not allowed to publish, or not approved: left out.
+        acl("urn:li:organization:777", "ANALYST"),
+        acl("urn:li:organization:888", "ADMINISTRATOR", "REQUESTED"),
+      ]),
+      organizationsRoute({
+        "2414183": { id: 2414183, localizedName: "Acme Coffee", vanityName: "acme-coffee" },
+        "555": { id: 555, localizedName: "Acme Roastery" },
+      }),
+    ]);
+    const provider = createPagesProvider(fetch);
+
+    const connection = await provider.handleOAuthCallback({
+      code: "code-1",
+      redirectUri: PAGES_REDIRECT,
+      loginMethod: "pages",
+    });
+
+    expect(formBody(requests[0])).toMatchObject({
+      client_id: "pages-client",
+      client_secret: "pages-secret",
+    });
+    expect(requests[2].url.href).toBe(
+      "https://api.linkedin.com/rest/organizations?ids=List(2414183,555)",
+    );
+    // More than one Page: the service asks which, so this isn't final.
+    expect(connection.singleAccount).toBeUndefined();
+    expect(connection.profile).toEqual({
+      providerAccountId: "2414183",
+      accountName: "Acme Coffee",
+      username: "acme-coffee",
+      profileImage: null,
+      metadata: {
+        accountType: "organization",
+        loginMethod: "pages",
+        authorUrn: "urn:li:organization:2414183",
+      },
+    });
+
+    const targets = await provider.listConnectionTargets(connection.tokens);
+    expect(targets.map((target) => [target.id, target.name])).toEqual([
+      ["2414183", "Acme Coffee"],
+      ["555", "Acme Roastery"],
+    ]);
+  });
+
+  it("reads the organizationTarget form of the access-control response too", async () => {
+    const { fetch } = fakeLinkedIn([
+      aclRoute([
+        { role: "ADMINISTRATOR", state: "APPROVED", organizationTarget: "urn:li:organization:9" },
+      ]),
+      organizationsRoute({ "9": { localizedName: "Nine" } }),
+    ]);
+    const targets = await createPagesProvider(fetch).listConnectionTargets({
+      accessToken: ACCESS_TOKEN,
+      scopes: [],
+    });
+    expect(targets).toEqual([
+      { id: "9", name: "Nine", username: null, image: null, description: "LinkedIn Page" },
+    ]);
+  });
+
+  it("keeps the login's own token and expiry when a Page is chosen", async () => {
+    const { fetch } = fakeLinkedIn([
+      aclRoute([acl("urn:li:organization:2414183")]),
+      organizationsRoute({ "2414183": { localizedName: "Acme Coffee" } }),
+    ]);
+    const tokens = {
+      accessToken: ACCESS_TOKEN,
+      refreshToken: "refresh-1",
+      expiresAt: new Date("2026-11-14T12:00:00.000Z"),
+      scopes: ["w_organization_social"],
+    };
+    const connection = await createPagesProvider(fetch).connectTarget(tokens, "2414183");
+    expect(connection.tokens).toBe(tokens);
+    expect(connection.profile.providerAccountId).toBe("2414183");
+  });
+
+  it("explains what to do when the member manages no Pages", async () => {
+    const { fetch } = fakeLinkedIn([pagesTokenRoute(), aclRoute([])]);
+    await expect(
+      createPagesProvider(fetch).handleOAuthCallback({
+        code: "c",
+        redirectUri: PAGES_REDIRECT,
+        loginMethod: "pages",
+      }),
+    ).rejects.toMatchObject({
+      kind: "PERMISSION_DENIED",
+      message: expect.stringContaining("admin"),
+    });
+  });
+
+  it("refuses a Pages login that didn't grant posting", async () => {
+    const { fetch } = fakeLinkedIn([pagesTokenRoute("rw_organization_admin")]);
+    await expect(
+      createPagesProvider(fetch).handleOAuthCallback({
+        code: "c",
+        redirectUri: PAGES_REDIRECT,
+        loginMethod: "pages",
+      }),
+    ).rejects.toMatchObject({ kind: "PERMISSION_DENIED" });
+  });
+
+  it("marks a profile login as a single account so no picker is shown", async () => {
+    const { fetch } = fakeLinkedIn([
+      tokenRoute(() =>
+        json(200, { access_token: ACCESS_TOKEN, expires_in: 5184000, scope: "w_member_social" }),
+      ),
+      userinfoRoute(),
+    ]);
+    const connection = await createPagesProvider(fetch).handleOAuthCallback({
+      code: "c",
+      redirectUri: PAGES_REDIRECT,
+      loginMethod: "profile",
+    });
+    expect(connection.singleAccount).toBe(true);
+  });
+
+  it("posts as the Page", async () => {
+    const { fetch, requests } = fakeLinkedIn([postsRoute(createdPost)]);
+    await createPagesProvider(fetch).publishText(pageCredentials, { text: "Hello from Acme" });
+    expect(jsonBody(requests[0]).author).toBe("urn:li:organization:2414183");
+  });
+
+  it("refreshes a Page token with the Pages app", async () => {
+    const { fetch, requests } = fakeLinkedIn([
+      tokenRoute(() => json(200, { access_token: "new", expires_in: 5184000 })),
+    ]);
+    const provider = createPagesProvider(fetch);
+
+    await provider.refreshAccessToken("refresh-1", { metadata: { loginMethod: "pages" } });
+    await provider.refreshAccessToken("refresh-2", { metadata: {} });
+
+    expect(formBody(requests[0]).client_id).toBe("pages-client");
+    // Accounts without a method are profiles from before Pages existed.
+    expect(formBody(requests[1]).client_id).toBe("client-123");
+  });
+
+  it("checks a Page connection by reading the Page", async () => {
+    const { fetch, requests } = fakeLinkedIn([
+      {
+        method: "GET",
+        match: (url) => url.pathname === "/rest/organizations/2414183",
+        respond: () => json(200, { id: 2414183, localizedName: "Acme Coffee" }),
+      },
+    ]);
+    const profile = await createPagesProvider(fetch).getProfile(pageCredentials);
+    expect(profile).toMatchObject({ providerAccountId: "2414183", accountName: "Acme Coffee" });
+    expect(requests[0].headers.get("linkedin-version")).toBe("202608");
+  });
+
+  it("asks for a reconnect when the member is no longer a Page admin", async () => {
+    const { fetch } = fakeLinkedIn([
+      {
+        method: "GET",
+        match: (url) => url.pathname === "/rest/organizations/2414183",
+        respond: () => json(403, { message: "Viewer don't have permission" }),
+      },
+    ]);
+    await expect(createPagesProvider(fetch).getProfile(pageCredentials)).rejects.toMatchObject({
+      kind: "PERMISSION_DENIED",
+    });
   });
 });

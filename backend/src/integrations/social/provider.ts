@@ -6,6 +6,7 @@ import type {
   AnalyticsResult,
   ConnectionTarget,
   AuthorizationRequest,
+  LoginMethod,
   AuthorizationRequestInput,
   OAuthCallbackInput,
   OAuthConnection,
@@ -17,6 +18,7 @@ import type {
   PublishResult,
   PublishTextInput,
   PublishVideoInput,
+  RefreshContext,
   SocialProfile,
 } from "./types";
 
@@ -25,7 +27,11 @@ export interface SocialOperations {
   getAuthorizationUrl(input: AuthorizationRequestInput): Promise<AuthorizationRequest>;
   /** Exchanges the authorization code and returns tokens plus the connected profile. */
   handleOAuthCallback(input: OAuthCallbackInput): Promise<OAuthConnection>;
-  refreshAccessToken(refreshToken: string): Promise<OAuthTokenSet>;
+  /**
+   * `account` carries the stored account's metadata, for providers whose
+   * accounts can come from different apps (LinkedIn profiles and Pages).
+   */
+  refreshAccessToken(refreshToken: string, account?: RefreshContext): Promise<OAuthTokenSet>;
   getProfile(credentials: ProviderCredentials): Promise<SocialProfile>;
   publishText(credentials: ProviderCredentials, input: PublishTextInput): Promise<PublishResult>;
   publishImage(credentials: ProviderCredentials, input: PublishImageInput): Promise<PublishResult>;
@@ -56,6 +62,12 @@ export interface SocialProvider extends SocialOperations {
   /** True when the integration is implemented and its app credentials are configured. */
   isAvailable(): boolean;
   supports(capability: SocialCapability): boolean;
+  /**
+   * Optional. Platforms with more than one way to sign in list them here, the
+   * default first. The chosen id is passed back to `getAuthorizationUrl` and
+   * `handleOAuthCallback`.
+   */
+  listLoginMethods?(): LoginMethod[];
 }
 
 /**
@@ -88,8 +100,8 @@ export abstract class BaseSocialProvider implements SocialProvider {
     );
   }
 
-  refreshAccessToken(refreshToken: string): Promise<OAuthTokenSet> {
-    return this.unsupported("TOKEN_REFRESH", refreshToken);
+  refreshAccessToken(refreshToken: string, account?: RefreshContext): Promise<OAuthTokenSet> {
+    return this.unsupported("TOKEN_REFRESH", refreshToken, account);
   }
 
   publishText(credentials: ProviderCredentials, input: PublishTextInput): Promise<PublishResult> {

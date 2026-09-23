@@ -851,6 +851,31 @@ describe("Choosing which account to connect", () => {
     expect(await SocialConnectionDraft.countDocuments({ workspace: workspace.id })).toBe(0);
   });
 
+  it("keeps the login's expiry and refresh token through the choice", async () => {
+    // LinkedIn Pages post with the member's own token, so its lifetime must survive.
+    const { owner, workspace } = await setup();
+    const { choose } = await startChoice(owner, workspace.id);
+    const draft = await SocialConnectionDraft.findOne({
+      _id: choose,
+      workspace: workspace.id,
+    }).select("+encryptedRefreshToken");
+    expect(draft?.tokenExpiresAt).toBeInstanceOf(Date);
+    expect(draft?.encryptedRefreshToken).toBeTruthy();
+
+    const path = `/social-accounts/connections/${choose}?workspaceId=${workspace.id}`;
+    const chosen = await call(owner, "post", path, { targetId: "page-1" }).expect(200);
+
+    const stored = await loadStored(chosen.body.data.account.id);
+    expect(stored?.tokenExpiresAt?.getTime()).toBe(draft?.tokenExpiresAt?.getTime());
+    expect(stored?.encryptedRefreshToken).toBeTruthy();
+
+    // And it refreshes like any other account.
+    await expireSoon(chosen.body.data.account.id, workspace.id);
+    const context = await contextFor(owner, workspace.id);
+    await SocialAccountService.publishText(context, chosen.body.data.account.id, { text: "Hi" });
+    expect(provider.countCalls("refreshAccessToken")).toBe(1);
+  });
+
   it("refuses an account that wasn't part of the authorization", async () => {
     const { owner, workspace } = await setup();
     const { choose } = await startChoice(owner, workspace.id);
@@ -894,5 +919,186 @@ describe("Choosing which account to connect", () => {
     expect(result).toEqual({ platform: "linkedin", connected: "1", workspaceId: workspace.id });
     expect(provider.connectedTargetIds).toEqual(["page-1"]);
     expect((await listAccounts(owner, workspace.id))[0].providerAccountId).toBe("page-1");
+  });
+});
+
+describe("Platforms with more than one way to sign in", () => {
+  const METHODS = [
+    { id: "direct", label: "Direct", available: true },
+    { id: "page", label: "Page", available: true },
+    { id: "later", label: "Later", available: false },
+  ];
+
+  const useMethods = () =>
+    useMockProvider({ loginMethods: METHODS, singleAccountMethods: ["direct"] });
+
+  const startWith = (user: TestUser, workspaceId: string, method?: string) =>
+    call(
+      user,
+      "get",
+      `/social-accounts/linkedin/connect?workspaceId=${workspaceId}${method ? `&method=${method}` : ""}`,
+    );
+
+  it("lists the methods with the platform", async () => {
+    useMethods();
+    const { owner, workspace } = await setup();
+    const res = await call(owner, "get", `${accountsPath(workspace.id)}/platforms`).expect(200);
+    const platforms = res.body.data.platforms as { platform: string; loginMethods: unknown[] }[];
+    expect(platforms.find((item) => item.platform === "LINKEDIN")?.loginMethods).toEqual(METHODS);
+    // Platforms with one way in list none.
+    expect(platforms.find((item) => item.platform === "TIKTOK")?.loginMethods).toEqual([]);
+  });
+
+  it("carries the chosen method from the consent page through the callback", async () => {
+    useMethods();
+    const { owner, workspace } = await setup();
+
+    const start = await startWith(owner, workspace.id, "page").expect(200);
+    const approval = provider.approve(start.body.data.authorizationUrl);
+    await sendCallback(owner, approval, bindingCookie(start));
+
+    expect(provider.loginMethodsSeen).toEqual([
+      { step: "authorize", loginMethod: "page" },
+      { step: "callback", loginMethod: "page" },
+    ]);
+    const [account] = await listAccounts(owner, workspace.id);
+    expect(account).toMatchObject({ loginMethod: "page" });
+  });
+
+  it("uses the first available method when none is asked for", async () => {
+    useMethods();
+    const { owner, workspace } = await setup();
+    await startWith(owner, workspace.id).expect(200);
+    expect(provider.loginMethodsSeen).toEqual([{ step: "authorize", loginMethod: "direct" }]);
+  });
+
+  it("refuses unknown and unconfigured methods", async () => {
+    useMethods();
+    const { owner, workspace } = await setup();
+
+    const unknown = await startWith(owner, workspace.id, "fax").expect(400);
+    expect(unknown.body.error.code).toBe("SOCIAL_INVALID_REQUEST");
+    const unconfigured = await startWith(owner, workspace.id, "later").expect(503);
+    expect(unconfigured.body.error.code).toBe("SOCIAL_PROVIDER_UNAVAILABLE");
+    await startWith(owner, workspace.id, "NOT-VALID").expect(422);
+    expect(provider.countCalls("getAuthorizationUrl")).toBe(0);
+  });
+
+  it("refuses a method for a platform that has only one way in", async () => {
+    const { owner, workspace } = await setup();
+    const res = await startWith(owner, workspace.id, "direct").expect(400);
+    expect(res.body.error.code).toBe("SOCIAL_INVALID_REQUEST");
+  });
+
+  it("skips the account picker when the login names a single account", async () => {
+    useMethods();
+    provider.offerTargets([
+      { id: "page-1", name: "One", username: null, image: null, description: null },
+      { id: "page-2", name: "Two", username: null, image: null, description: null },
+    ]);
+    const { owner, workspace } = await setup();
+
+    const start = await startWith(owner, workspace.id, "direct").expect(200);
+    const approval = provider.approve(start.body.data.authorizationUrl);
+    const res = await sendCallback(owner, approval, bindingCookie(start));
+
+    expect(redirectResult(res)).toMatchObject({ connected: "1" });
+    expect(provider.connectedTargetIds).toEqual([]);
+    const [account] = await listAccounts(owner, workspace.id);
+    expect(account.providerAccountId).toBe("mock-account-1");
+  });
+
+  it("treats Meta's user_denied as the user cancelling", async () => {
+    const { owner, workspace } = await setup();
+    const start = await startConnection(owner, workspace.id).expect(200);
+    const { state } = provider.approve(start.body.data.authorizationUrl);
+    const res = await sendCallback(
+      owner,
+      { state, error: "access_denied", error_reason: "user_denied" },
+      bindingCookie(start),
+    );
+    expect(redirectResult(res)).toMatchObject({ error: "cancelled" });
+  });
+});
+
+describe("Tokens that must be renewed ahead of time", () => {
+  const DAY_MS = 24 * 60 * 60_000;
+
+  const expireIn = (accountId: string, workspaceId: string, ms: number) =>
+    SocialAccount.updateOne(
+      { _id: accountId, workspace: workspaceId },
+      { $set: { tokenExpiresAt: new Date(Date.now() + ms) } },
+    );
+
+  it("refreshes inside the provider's window instead of at the last minute", async () => {
+    useMockProvider({ refreshBeforeExpiryMs: 10 * DAY_MS, accessTokenTtlSeconds: 60 * 86_400 });
+    const { owner, workspace } = await setup();
+    const account = await connectAccount(owner, workspace.id);
+    const context = await contextFor(owner, workspace.id);
+
+    await SocialAccountService.publishText(context, account.id, { text: "Plenty of time" });
+    expect(provider.countCalls("refreshAccessToken")).toBe(0);
+
+    await expireIn(account.id, workspace.id, 5 * DAY_MS);
+    await SocialAccountService.publishText(context, account.id, { text: "Renewed first" });
+    expect(provider.countCalls("refreshAccessToken")).toBe(1);
+    expect((await loadStored(account.id))?.tokenExpiresAt?.getTime()).toBeGreaterThan(
+      Date.now() + 50 * DAY_MS,
+    );
+  });
+
+  it("still publishes when an early refresh hits a temporary error", async () => {
+    useMockProvider({ refreshBeforeExpiryMs: 10 * DAY_MS, accessTokenTtlSeconds: 60 * 86_400 });
+    const { owner, workspace } = await setup();
+    const account = await connectAccount(owner, workspace.id);
+    const context = await contextFor(owner, workspace.id);
+    await expireIn(account.id, workspace.id, 5 * DAY_MS);
+
+    provider.failNext(
+      "refreshAccessToken",
+      new SocialProviderError("PROVIDER_ERROR", "Try later", {
+        platform: "LINKEDIN",
+        retryable: true,
+      }),
+    );
+    await SocialAccountService.publishText(context, account.id, { text: "Goes out anyway" });
+    expect(provider.countCalls("publishText")).toBe(1);
+    expect(await loadStored(account.id)).toMatchObject({ status: "CONNECTED" });
+  });
+
+  it("stops when an early refresh finds the access revoked", async () => {
+    useMockProvider({ refreshBeforeExpiryMs: 10 * DAY_MS, accessTokenTtlSeconds: 60 * 86_400 });
+    const { owner, workspace } = await setup();
+    const account = await connectAccount(owner, workspace.id);
+    const context = await contextFor(owner, workspace.id);
+    await expireIn(account.id, workspace.id, 5 * DAY_MS);
+
+    provider.failNext("refreshAccessToken", provider.error("REAUTH_REQUIRED", "Revoked"));
+    await expect(
+      SocialAccountService.publishText(context, account.id, { text: "Nope" }),
+    ).rejects.toMatchObject({ code: "SOCIAL_REAUTH_REQUIRED" });
+    expect(provider.countCalls("publishText")).toBe(0);
+  });
+
+  it("renews idle accounts from the worker sweep, and only those near expiry", async () => {
+    useMockProvider({ refreshBeforeExpiryMs: 10 * DAY_MS, accessTokenTtlSeconds: 60 * 86_400 });
+    const { owner, workspace } = await setup();
+    const account = await connectAccount(owner, workspace.id);
+
+    expect(await SocialAccountService.refreshExpiringTokens()).toEqual({ refreshed: 0, failed: 0 });
+
+    await expireIn(account.id, workspace.id, 3 * DAY_MS);
+    expect(await SocialAccountService.refreshExpiringTokens()).toEqual({ refreshed: 1, failed: 0 });
+    const stored = await loadStored(account.id);
+    expect(stored?.status).toBe("CONNECTED");
+    expect(stored?.tokenExpiresAt?.getTime()).toBeGreaterThan(Date.now() + 50 * DAY_MS);
+  });
+
+  it("leaves providers without a window to refresh on use", async () => {
+    const { owner, workspace } = await setup();
+    const account = await connectAccount(owner, workspace.id);
+    await expireSoon(account.id, workspace.id);
+    expect(await SocialAccountService.refreshExpiringTokens()).toEqual({ refreshed: 0, failed: 0 });
+    expect(provider.countCalls("refreshAccessToken")).toBe(0);
   });
 });

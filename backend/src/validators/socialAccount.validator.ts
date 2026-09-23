@@ -17,11 +17,22 @@ export const connectSocialAccountQuerySchema = z.object({
   workspaceId: objectIdField,
 });
 
+/** Starting a connection can also say how to sign in, for platforms that offer a choice. */
+export const startConnectionQuerySchema = connectSocialAccountQuerySchema.extend({
+  method: z
+    .string()
+    .trim()
+    .regex(/^[a-z_]{1,32}$/, "Unknown sign-in method")
+    .optional(),
+});
+
 /** What the platform appends to the redirect: a code on success, an error when declined. */
 export const oauthCallbackQuerySchema = z.object({
   code: z.string().max(4096).optional(),
   state: z.string().max(512).optional(),
   error: z.string().max(200).optional(),
+  // Meta sends error=access_denied&error_reason=user_denied when the user declines.
+  error_reason: z.string().max(200).optional(),
   error_description: z.string().max(1000).optional(),
 });
 
@@ -51,6 +62,7 @@ export const publishSocialPostSchema = z
 
 export type SocialPlatformParams = z.infer<typeof socialPlatformParamsSchema>;
 export type ConnectSocialAccountQuery = z.infer<typeof connectSocialAccountQuerySchema>;
+export type StartConnectionQuery = z.infer<typeof startConnectionQuerySchema>;
 export type OAuthCallbackQuery = z.infer<typeof oauthCallbackQuerySchema>;
 export type SocialAccountIdParams = z.infer<typeof socialAccountIdParamsSchema>;
 export type PublishSocialPostInput = z.infer<typeof publishSocialPostSchema>;

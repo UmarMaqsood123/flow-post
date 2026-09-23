@@ -25,14 +25,17 @@ export const socialAccountsApi = {
   startConnection: async ({
     platform,
     workspaceId,
+    method,
   }: {
     platform: ConnectablePlatform;
     workspaceId: string;
+    /** A `LoginMethod` id, for platforms with more than one way to sign in. */
+    method?: string;
   }) =>
     (
       await api.get<{ authorizationUrl: string; expiresAt: string }>(
         `/social-accounts/${platform.toLowerCase()}/connect`,
-        { params: { workspaceId } },
+        { params: { workspaceId, method } },
       )
     ).data,
 

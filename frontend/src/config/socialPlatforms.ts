@@ -1,6 +1,7 @@
 import { formatRelativeTime } from "@/lib/format";
 import type {
   ConnectablePlatform,
+  SocialAccount,
   SocialAccountStatus,
   SocialCapability,
 } from "@/types/socialAccount";
@@ -15,19 +16,49 @@ interface PlatformDetails {
   setupHint?: string;
   /** Shown when disconnecting: how to remove FlowPost's access on the platform itself. */
   revokeHint?: string;
+  /**
+   * Copy for each way of signing in, keyed by the API's login method id, for
+   * platforms that offer more than one. Overrides `revokeHint` for accounts
+   * connected that way.
+   */
+  loginMethods?: Record<string, LoginMethodDetails>;
+  /** The method accounts connected before there was a choice used. */
+  legacyLoginMethod?: string;
+}
+
+interface LoginMethodDetails {
+  buttonLabel: string;
+  /** One line under the buttons saying when to pick this one. */
+  hint: string;
+  revokeHint: string;
 }
 
 /** What each integration really supports — keep in sync with the backend providers. */
 export const PLATFORM_DETAILS: Record<ConnectablePlatform, PlatformDetails> = {
   LINKEDIN: {
     implemented: true,
-    description: "Publish to your personal LinkedIn profile.",
+    description: "Publish to your personal LinkedIn profile or a Company Page you manage.",
     supported: ["Text posts", "Posts with one JPG or PNG image"],
-    unsupported: ["Company pages", "Videos and multi-image posts", "Post analytics"],
+    unsupported: ["Videos and multi-image posts", "Post analytics"],
     setupHint:
       "LinkedIn isn't configured on this server yet. An administrator needs to add the LinkedIn app credentials.",
     revokeHint:
       "LinkedIn keeps FlowPost listed as a permitted app until you remove it in LinkedIn's Settings → Data privacy → Permitted services, or the access expires.",
+    legacyLoginMethod: "profile",
+    loginMethods: {
+      profile: {
+        buttonLabel: "Connect a profile",
+        hint: "Post as yourself, on your personal LinkedIn profile.",
+        revokeHint:
+          "LinkedIn keeps FlowPost listed as a permitted app until you remove it in LinkedIn's Settings → Data privacy → Permitted services, or the access expires.",
+      },
+      pages: {
+        buttonLabel: "Connect a Company Page",
+        hint: "Post as a Page where you're an admin or content admin. If you manage several, you'll pick one.",
+        revokeHint:
+          "FlowPost posts to this Page with your LinkedIn sign-in. Remove FlowPost in LinkedIn's Settings → Data privacy → Permitted services, or lose your admin role on the Page, to revoke it.",
+      },
+    },
   },
   FACEBOOK: {
     implemented: true,
@@ -38,7 +69,11 @@ export const PLATFORM_DETAILS: Record<ConnectablePlatform, PlatformDetails> = {
       "Videos and Reels",
       "Deleting posts FlowPost published",
     ],
-    unsupported: ["Personal profiles and groups", "Custom link previews", "Post analytics"],
+    unsupported: [
+      "Personal profiles and groups (Facebook doesn't let apps post to them)",
+      "Custom link previews",
+      "Post analytics",
+    ],
     setupHint:
       "Facebook isn't configured on this server yet. An administrator needs to add the Meta app credentials.",
     revokeHint:
@@ -46,17 +81,33 @@ export const PLATFORM_DETAILS: Record<ConnectablePlatform, PlatformDetails> = {
   },
   INSTAGRAM: {
     implemented: true,
-    description: "Publish to an Instagram professional account linked to a Facebook Page.",
+    description: "Publish to an Instagram Business or Creator account.",
     supported: ["Photo posts", "Carousels of up to 10 items", "Reels"],
     unsupported: [
       "Text-only posts (Instagram needs an image or video)",
-      "Personal accounts, and scheduling without media",
+      "Personal accounts (switch to a free Business or Creator account in the Instagram app)",
+      "Scheduling without media",
       "Stories, and deleting published posts",
     ],
     setupHint:
-      "Instagram isn't configured on this server yet. An administrator needs to add the Meta app credentials.",
+      "Instagram isn't configured on this server yet. An administrator needs to add the Instagram or Meta app credentials.",
     revokeHint:
       "Access comes from the linked Facebook Page. Remove FlowPost in Facebook's Settings → Business integrations to revoke it.",
+    legacyLoginMethod: "facebook",
+    loginMethods: {
+      instagram: {
+        buttonLabel: "Continue with Instagram",
+        hint: "Sign in with your Instagram account. No Facebook Page needed.",
+        revokeHint:
+          "Remove FlowPost in Instagram under Settings → Website permissions → Apps and websites to revoke access.",
+      },
+      facebook: {
+        buttonLabel: "Connect through a Facebook Page",
+        hint: "Use this if your Instagram account is already linked to a Facebook Page you manage.",
+        revokeHint:
+          "Access comes from the linked Facebook Page. Remove FlowPost in Facebook's Settings → Business integrations to revoke it.",
+      },
+    },
   },
   TIKTOK: {
     implemented: true,
@@ -88,6 +139,13 @@ export const PLATFORM_DETAILS: Record<ConnectablePlatform, PlatformDetails> = {
       "Remove FlowPost at myaccount.google.com \u2192 Security \u2192 Third-party apps with account access.",
   },
 };
+
+/**
+ * How to reconnect an account: the way it was connected. Accounts from before a
+ * platform offered a choice have no method stored and used its original one.
+ */
+export const reconnectLoginMethod = (account: SocialAccount): string | undefined =>
+  account.loginMethod ?? PLATFORM_DETAILS[account.platform].legacyLoginMethod;
 
 export type StatusTone = "success" | "warning" | "danger" | "neutral";
 

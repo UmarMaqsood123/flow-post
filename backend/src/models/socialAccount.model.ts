@@ -121,6 +121,8 @@ export interface PublicSocialAccount {
   status: SocialAccountStatusValue;
   scopes: string[];
   capabilities: SocialCapability[];
+  /** How it was signed in, for platforms with a choice (Instagram); used to reconnect the same way. */
+  loginMethod: string | null;
   tokenExpiresAt: Date | null;
   lastConnectedAt: Date;
   lastRefreshedAt: Date | null;
@@ -144,6 +146,8 @@ export const toPublicSocialAccount = (
   status: account.status,
   scopes: [...account.scopes],
   capabilities,
+  loginMethod:
+    typeof account.metadata?.loginMethod === "string" ? account.metadata.loginMethod : null,
   tokenExpiresAt: account.tokenExpiresAt ?? null,
   lastConnectedAt: account.lastConnectedAt,
   lastRefreshedAt: account.lastRefreshedAt ?? null,

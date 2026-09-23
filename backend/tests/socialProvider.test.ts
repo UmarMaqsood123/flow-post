@@ -161,7 +161,16 @@ describe("Default providers", () => {
         "VIDEO_POST",
       ],
       // Instagram has no text-only post and can't delete published media.
-      INSTAGRAM: ["ANALYTICS", "CAROUSEL", "IMAGE_POST", "READ_POST", "SHORT_VIDEO", "VIDEO_POST"],
+      // Token refresh is for Instagram Login; Page tokens don't expire.
+      INSTAGRAM: [
+        "ANALYTICS",
+        "CAROUSEL",
+        "IMAGE_POST",
+        "READ_POST",
+        "SHORT_VIDEO",
+        "TOKEN_REFRESH",
+        "VIDEO_POST",
+      ],
       // TikTok photo posts need a verified media domain, so they aren't built.
       TIKTOK: ["ANALYTICS", "SHORT_VIDEO", "TOKEN_REFRESH", "VIDEO_POST"],
       // Deleting needs a broader Google scope than uploading asks for.

@@ -31,6 +31,7 @@ import type {
   AnalyticsQuery,
   AnalyticsResult,
   ConnectionTarget,
+  LoginMethod,
   MediaAsset,
   OAuthConnection,
   OAuthTokenSet,
@@ -70,6 +71,10 @@ import * as NotificationEvents from "./notificationEvents.service";
 
 /** Refresh tokens that expire within this window before using them. */
 const TOKEN_REFRESH_LEEWAY_MS = 5 * 60_000;
+
+/** How close to expiry a token is refreshed: the provider's window, or just before. */
+const refreshWindowMs = (provider: SocialProvider) =>
+  Math.max(provider.oauth.refreshBeforeExpiryMs ?? 0, TOKEN_REFRESH_LEEWAY_MS);
 const SECRET_LIKE_KEY = /token|secret|password|credential/i;
 
 // ── Errors ─────────────────────────────────────────────────
@@ -376,7 +381,7 @@ const refreshTokens = async (
     const stillFresh =
       account.tokenExpiresAt !== null &&
       account.tokenExpiresAt !== undefined &&
-      account.tokenExpiresAt.getTime() - Date.now() > TOKEN_REFRESH_LEEWAY_MS;
+      account.tokenExpiresAt.getTime() - Date.now() > refreshWindowMs(provider);
     if (refreshedMeanwhile && stillFresh && account.status === SocialAccountStatus.CONNECTED) {
       return;
     }
@@ -429,7 +434,9 @@ const refreshTokensLocked = async (
   }
 
   try {
-    const tokens = await provider.refreshAccessToken(refreshToken);
+    const tokens = await provider.refreshAccessToken(refreshToken, {
+      metadata: { ...account.metadata },
+    });
     applyTokens(account, tokens, box, { keepRefreshToken: true });
     account.set({
       status: SocialAccountStatus.CONNECTED,
@@ -496,9 +503,21 @@ const getCredentials = async (
   }
 
   const expiresAt = account.tokenExpiresAt?.getTime();
-  const expiresSoon = expiresAt !== undefined && expiresAt - Date.now() <= TOKEN_REFRESH_LEEWAY_MS;
-  if (account.status === SocialAccountStatus.EXPIRED || expiresSoon) {
+  const expiresSoon =
+    expiresAt !== undefined && expiresAt - Date.now() <= refreshWindowMs(provider);
+  // A token refreshed early is still valid, so a failed early refresh isn't fatal:
+  // the next use or sweep tries again. Only a token that's actually expiring has to succeed.
+  const mustRefresh =
+    account.status === SocialAccountStatus.EXPIRED ||
+    (expiresAt !== undefined && expiresAt - Date.now() <= TOKEN_REFRESH_LEEWAY_MS);
+  if (mustRefresh) {
     await refreshTokens(account, provider, box);
+  } else if (expiresSoon) {
+    await refreshTokens(account, provider, box).catch((error: unknown) => {
+      // The platform said the token is dead (revoked, password changed): don't use it.
+      if (account.status !== SocialAccountStatus.CONNECTED) throw error;
+      logger.warn({ err: error, accountId: account.id }, "Early token refresh failed");
+    });
   }
 
   const encryptedAccessToken = account.encryptedAccessToken;
@@ -565,6 +584,8 @@ export interface PublicSocialPlatform {
   displayName: string;
   available: boolean;
   capabilities: SocialCapability[];
+  /** Ways to sign in, when the platform offers more than one; empty otherwise. */
+  loginMethods: LoginMethod[];
 }
 
 export const listPlatforms = (): PublicSocialPlatform[] =>
@@ -575,6 +596,7 @@ export const listPlatforms = (): PublicSocialPlatform[] =>
       displayName: provider.displayName,
       available: provider.isAvailable(),
       capabilities: [...provider.capabilities],
+      loginMethods: provider.listLoginMethods?.() ?? [],
     }));
 
 export const listAccounts = async (workspaceId: Types.ObjectId): Promise<PublicSocialAccount[]> => {
@@ -603,13 +625,58 @@ export interface StartedConnection {
   browserBinding: string;
 }
 
+/**
+ * The login method a connection uses: the one asked for, or the first available.
+ * Null for providers with only one way to sign in.
+ */
+const resolveLoginMethod = (
+  provider: SocialProvider,
+  requested: string | undefined,
+): string | null => {
+  const methods = provider.listLoginMethods?.() ?? [];
+  if (methods.length === 0) {
+    if (requested) {
+      throw AppError.badRequest(
+        `${provider.displayName} has only one way to connect`,
+        undefined,
+        ErrorCode.SOCIAL_INVALID_REQUEST,
+      );
+    }
+    return null;
+  }
+  const method = requested
+    ? methods.find((item) => item.id === requested)
+    : methods.find((item) => item.available);
+  if (!method) {
+    throw AppError.badRequest(
+      `That isn't a way to connect ${provider.displayName}`,
+      undefined,
+      ErrorCode.SOCIAL_INVALID_REQUEST,
+    );
+  }
+  if (!method.available) {
+    throw new AppError(
+      `Connecting ${provider.displayName} through ${method.label} isn't set up on this server`,
+      HttpStatus.SERVICE_UNAVAILABLE,
+      {
+        code: ErrorCode.SOCIAL_PROVIDER_UNAVAILABLE,
+        isOperational: true,
+        details: { platform: provider.platform },
+      },
+    );
+  }
+  return method.id;
+};
+
 /** Starts OAuth: stores a hashed, single-use state and returns the platform's consent URL. */
 export const startConnection = async (
   { workspace, user }: WorkspaceContext,
   platform: SocialPlatformValue,
+  requestedLoginMethod?: string,
 ): Promise<StartedConnection> => {
   const box = requireSecretBox();
   const provider = getAvailableProvider(platform);
+  const loginMethod = resolveLoginMethod(provider, requestedLoginMethod);
   // Checked up front so nobody goes through a platform's consent screen for nothing.
   // Reconnecting an existing account is checked again (and allowed) when it's stored.
   await EntitlementService.assertCanAddSocialAccount(workspace);
@@ -623,11 +690,16 @@ export const startConnection = async (
     stateHash: hashToken(state),
     bindingHash: hashToken(browserBinding),
     redirectUri: callbackUrlFor(provider),
+    loginMethod,
     expiresAt: new Date(Date.now() + env.SOCIAL_OAUTH_STATE_TTL_MINUTES * 60_000),
   });
 
   const request = await callProvider(() =>
-    provider.getAuthorizationUrl({ state, redirectUri: oauthState.redirectUri }),
+    provider.getAuthorizationUrl({
+      state,
+      redirectUri: oauthState.redirectUri,
+      loginMethod: loginMethod ?? undefined,
+    }),
   );
   if (new URL(request.url).protocol !== "https:") {
     throw AppError.internal(`${provider.displayName} returned a non-HTTPS authorization URL`);
@@ -734,14 +806,19 @@ export const completeConnection = async ({
     ? box.decrypt(oauthState.encryptedCodeVerifier, codeVerifierContext(oauthState))
     : undefined;
 
-  const { tokens, profile } = await callProvider(() =>
-    provider.handleOAuthCallback({ code, redirectUri: oauthState.redirectUri, codeVerifier }),
+  const { tokens, profile, singleAccount } = await callProvider(() =>
+    provider.handleOAuthCallback({
+      code,
+      redirectUri: oauthState.redirectUri,
+      codeVerifier,
+      loginMethod: oauthState.loginMethod ?? undefined,
+    }),
   );
 
   // Platforms where one login covers several accounts (Facebook Pages, Instagram
-  // professional accounts) hand back the candidates instead of a finished
+  // through Facebook Login) hand back the candidates instead of a finished
   // connection, so the user picks rather than us guessing.
-  if (provider.listConnectionTargets && provider.connectTarget) {
+  if (!singleAccount && provider.listConnectionTargets && provider.connectTarget) {
     const targets = await callProvider(() => provider.listConnectionTargets!(tokens));
     if (targets.length > 1) {
       const draft = await saveConnectionDraft({
@@ -885,6 +962,14 @@ const saveConnectionDraft = async ({
     expiresAt: new Date(Date.now() + env.SOCIAL_OAUTH_STATE_TTL_MINUTES * 60_000),
   });
   draft.encryptedAccessToken = box.encrypt(tokens.accessToken, draftTokenContext(draft));
+  if (tokens.refreshToken) {
+    draft.encryptedRefreshToken = box.encrypt(
+      tokens.refreshToken,
+      `${draftTokenContext(draft)}:refresh`,
+    );
+  }
+  draft.tokenExpiresAt = tokens.expiresAt ?? null;
+  draft.refreshTokenExpiresAt = tokens.refreshTokenExpiresAt ?? null;
   await draft.save();
   return draft;
 };
@@ -928,7 +1013,7 @@ export const completeConnectionChoice = async (
     workspace: workspace._id,
     user: user._id,
     expiresAt: { $gt: new Date() },
-  }).select("+encryptedAccessToken");
+  }).select("+encryptedAccessToken +encryptedRefreshToken");
   if (!draft) throw AppError.notFound("That connection has expired. Start again.");
 
   const provider = getAvailableProvider(draft.platform);
@@ -936,8 +1021,20 @@ export const completeConnectionChoice = async (
     throw AppError.internal(`${provider.displayName} doesn't support choosing an account`);
   }
   const accessToken = box.decrypt(draft.encryptedAccessToken, draftTokenContext(draft));
+  const refreshToken = draft.encryptedRefreshToken
+    ? box.decrypt(draft.encryptedRefreshToken, `${draftTokenContext(draft)}:refresh`)
+    : null;
   const connection = await callProvider(() =>
-    provider.connectTarget!({ accessToken, scopes: draft.scopes }, targetId),
+    provider.connectTarget!(
+      {
+        accessToken,
+        refreshToken,
+        expiresAt: draft.tokenExpiresAt,
+        refreshTokenExpiresAt: draft.refreshTokenExpiresAt,
+        scopes: draft.scopes,
+      },
+      targetId,
+    ),
   );
   const account = await storeConnection({
     workspace,
@@ -948,6 +1045,49 @@ export const completeConnectionChoice = async (
     box,
   });
   return account;
+};
+
+/**
+ * Renews tokens that would otherwise lapse while nobody uses the account.
+ * Instagram Login tokens can't be refreshed once expired, so an account that
+ * posts rarely would need reconnecting every two months without this. Runs from
+ * the worker; failures are recorded on the account like any other refresh.
+ */
+export const refreshExpiringTokens = async ({ now = new Date() }: { now?: Date } = {}): Promise<{
+  refreshed: number;
+  failed: number;
+}> => {
+  const box = getTokenSecretBox();
+  if (!box) return { refreshed: 0, failed: 0 };
+  const result = { refreshed: 0, failed: 0 };
+
+  for (const provider of getSocialProviderRegistry().list()) {
+    const window = provider.oauth.refreshBeforeExpiryMs;
+    if (!window || !provider.supports("TOKEN_REFRESH")) continue;
+    const accounts = await SocialAccount.find({
+      platform: provider.platform,
+      status: SocialAccountStatus.CONNECTED,
+      encryptedRefreshToken: { $ne: null },
+      tokenExpiresAt: { $ne: null, $lte: new Date(now.getTime() + window) },
+    })
+      // A cross-workspace maintenance job; each account is updated in its own workspace.
+      .setOptions({ skipWorkspaceScope: true })
+      .select("+encryptedAccessToken +encryptedRefreshToken");
+
+    for (const account of accounts) {
+      try {
+        await refreshTokens(account, provider, box);
+        result.refreshed += 1;
+      } catch (error) {
+        result.failed += 1;
+        logger.warn(
+          { err: error, accountId: account.id, platform: provider.platform },
+          "Scheduled token refresh failed",
+        );
+      }
+    }
+  }
+  return result;
 };
 
 /**

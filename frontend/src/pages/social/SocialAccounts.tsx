@@ -10,7 +10,11 @@ import PlatformCard from "@/components/social/PlatformCard";
 import SocialAccountCard from "@/components/social/SocialAccountCard";
 import Alert from "@/components/ui/Alert";
 import Skeleton from "@/components/ui/Skeleton";
-import { CONNECT_ERROR_MESSAGES, platformNameFromSlug } from "@/config/socialPlatforms";
+import {
+  CONNECT_ERROR_MESSAGES,
+  platformNameFromSlug,
+  reconnectLoginMethod,
+} from "@/config/socialPlatforms";
 import { getErrorMessage } from "@/lib/forms";
 import { hasMinimumRole } from "@/lib/workspaceRoles";
 import {
@@ -87,11 +91,14 @@ function SocialAccounts() {
   const platformList = platforms.data ?? [];
   const platformInfo = (platform: ConnectablePlatform) =>
     platformList.find((item) => item.platform === platform);
-  const isConnecting = (platform: ConnectablePlatform) =>
-    connect.isPending && connect.variables?.platform === platform;
-  const startConnection = (platform: ConnectablePlatform) => {
+  const connectingFor = (platform: ConnectablePlatform) =>
+    connect.isPending && connect.variables?.platform === platform
+      ? { method: connect.variables.method }
+      : null;
+  const isConnecting = (platform: ConnectablePlatform) => connectingFor(platform) !== null;
+  const startConnection = (platform: ConnectablePlatform, method?: string) => {
     connect.mutate(
-      { platform, workspaceId },
+      { platform, workspaceId, method },
       { onError: (error) => notify.error(error, undefined, "social-connect") },
     );
   };
@@ -179,7 +186,9 @@ function SocialAccounts() {
                 platformName={platformInfo(account.platform)?.displayName ?? account.platform}
                 canManage={canManage}
                 canTest={canTest}
-                onReconnect={() => startConnection(account.platform)}
+                // Reconnect the way it was connected: an Instagram account signed in
+                // directly has no Facebook Page to come back through.
+                onReconnect={() => startConnection(account.platform, reconnectLoginMethod(account))}
                 isReconnecting={isConnecting(account.platform)}
                 reconnectDisabled={connect.isPending || !platformInfo(account.platform)?.available}
               />
@@ -220,9 +229,9 @@ function SocialAccounts() {
                   accountList.filter((account) => account.platform === platform.platform).length
                 }
                 canManage={canManage}
-                isConnecting={isConnecting(platform.platform)}
+                connecting={connectingFor(platform.platform)}
                 disabled={connect.isPending}
-                onConnect={() => startConnection(platform.platform)}
+                onConnect={(method) => startConnection(platform.platform, method)}
               />
             ))}
           </ul>

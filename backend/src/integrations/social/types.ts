@@ -10,12 +10,31 @@ export interface ProviderOAuthConfig {
    * `FRONTEND_URL/api/v1/social-accounts/<platform>/callback`.
    */
   redirectUri?: string;
+  /**
+   * Refresh this long before the access token expires, instead of at the last
+   * minute. For platforms whose tokens can only be refreshed while still valid
+   * (Instagram), so an account nobody uses for a while doesn't silently lapse.
+   */
+  refreshBeforeExpiryMs?: number;
+}
+
+/**
+ * One way of signing in to a platform, for platforms that offer more than one
+ * (Instagram: directly, or through a Facebook Page).
+ */
+export interface LoginMethod {
+  id: string;
+  label: string;
+  /** Its app credentials are configured on this server. */
+  available: boolean;
 }
 
 export interface AuthorizationRequestInput {
   /** Opaque, single-use value the provider must return unchanged. */
   state: string;
   redirectUri: string;
+  /** Which `LoginMethod` to use, for providers that have several. */
+  loginMethod?: string;
 }
 
 export interface AuthorizationRequest {
@@ -28,6 +47,8 @@ export interface OAuthCallbackInput {
   code: string;
   redirectUri: string;
   codeVerifier?: string;
+  /** The login method the flow was started with. */
+  loginMethod?: string;
 }
 
 export interface OAuthTokenSet {
@@ -53,6 +74,11 @@ export interface SocialProfile {
 export interface OAuthConnection {
   tokens: OAuthTokenSet;
   profile: SocialProfile;
+  /**
+   * The login covers exactly this account, so there's nothing to choose even on
+   * a provider that implements `listConnectionTargets`.
+   */
+  singleAccount?: boolean;
 }
 
 /**
@@ -68,6 +94,11 @@ export interface ConnectionTarget {
   image?: string | null;
   /** Short context, e.g. the Page an Instagram account is linked to. */
   description?: string | null;
+}
+
+/** What a token refresh knows about the account it's for. */
+export interface RefreshContext {
+  metadata: Record<string, unknown>;
 }
 
 /** Decrypted credentials handed to a provider for a single operation. Never persisted or logged. */

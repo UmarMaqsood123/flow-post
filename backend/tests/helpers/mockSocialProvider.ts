@@ -12,6 +12,7 @@ import type {
   AnalyticsResult,
   AuthorizationRequest,
   AuthorizationRequestInput,
+  LoginMethod,
   OAuthCallbackInput,
   OAuthConnection,
   OAuthTokenSet,
@@ -33,6 +34,11 @@ export interface MockSocialProviderOptions {
   usesPkce?: boolean;
   /** Access token lifetime; null = tokens never expire. */
   accessTokenTtlSeconds?: number | null;
+  /** Offer several ways to sign in, like Instagram does. */
+  loginMethods?: LoginMethod[];
+  /** Login methods whose callback names exactly one account (no picker). */
+  singleAccountMethods?: string[];
+  refreshBeforeExpiryMs?: number;
 }
 
 const challengeFor = (verifier: string) =>
@@ -58,6 +64,10 @@ export class MockSocialProvider extends BaseSocialProvider {
   /** Inputs passed to publish methods, in order. */
   readonly publishedInputs: (PublishTextInput | PublishImageInput | PublishVideoInput)[] = [];
   readonly issuedAccessTokens: string[] = [];
+  /** The login method each authorization and callback was given, in order. */
+  readonly loginMethodsSeen: { step: "authorize" | "callback"; loginMethod?: string }[] = [];
+  private readonly singleAccountMethods: string[];
+  listLoginMethods?: () => LoginMethod[];
   private readonly validAccessTokens = new Set<string>();
   private readonly validRefreshTokens = new Set<string>();
   private readonly pendingCodes = new Map<string, string | null>();
@@ -85,7 +95,14 @@ export class MockSocialProvider extends BaseSocialProvider {
         "TOKEN_REFRESH",
       ],
     );
-    this.oauth = { scopes: ["mock.read", "mock.publish"], usesPkce: options.usesPkce ?? false };
+    this.oauth = {
+      scopes: ["mock.read", "mock.publish"],
+      usesPkce: options.usesPkce ?? false,
+      refreshBeforeExpiryMs: options.refreshBeforeExpiryMs,
+    };
+    const loginMethods = options.loginMethods;
+    if (loginMethods) this.listLoginMethods = () => loginMethods.map((method) => ({ ...method }));
+    this.singleAccountMethods = options.singleAccountMethods ?? [];
     this.available = options.available ?? true;
     this.accessTokenTtlSeconds =
       options.accessTokenTtlSeconds === undefined ? 3600 : options.accessTokenTtlSeconds;
@@ -212,8 +229,10 @@ export class MockSocialProvider extends BaseSocialProvider {
   async getAuthorizationUrl({
     state,
     redirectUri,
+    loginMethod,
   }: AuthorizationRequestInput): Promise<AuthorizationRequest> {
     this.begin("getAuthorizationUrl");
+    this.loginMethodsSeen.push({ step: "authorize", loginMethod });
     const url = new URL("https://auth.mock-social.test/oauth/authorize");
     url.searchParams.set("state", state);
     url.searchParams.set("redirect_uri", redirectUri);
@@ -225,8 +244,13 @@ export class MockSocialProvider extends BaseSocialProvider {
     return { url: url.toString(), codeVerifier };
   }
 
-  async handleOAuthCallback({ code, codeVerifier }: OAuthCallbackInput): Promise<OAuthConnection> {
+  async handleOAuthCallback({
+    code,
+    codeVerifier,
+    loginMethod,
+  }: OAuthCallbackInput): Promise<OAuthConnection> {
     this.begin("handleOAuthCallback");
+    this.loginMethodsSeen.push({ step: "callback", loginMethod });
     if (!this.pendingCodes.has(code)) {
       throw this.error("INVALID_REQUEST", "Unknown or reused authorization code");
     }
@@ -235,7 +259,13 @@ export class MockSocialProvider extends BaseSocialProvider {
     if (challenge && (!codeVerifier || challengeFor(codeVerifier) !== challenge)) {
       throw this.error("INVALID_REQUEST", "PKCE verification failed");
     }
-    return { tokens: this.issueTokens(), profile: { ...this.profile } };
+    const profile = { ...this.profile };
+    if (loginMethod) profile.metadata = { ...profile.metadata, loginMethod };
+    return {
+      tokens: this.issueTokens(),
+      profile,
+      singleAccount: loginMethod ? this.singleAccountMethods.includes(loginMethod) : undefined,
+    };
   }
 
   override async refreshAccessToken(refreshToken: string): Promise<OAuthTokenSet> {

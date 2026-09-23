@@ -190,8 +190,17 @@ const envSchema = z
       .default(21_600_000),
     LINKEDIN_CLIENT_ID: optionalString,
     LINKEDIN_CLIENT_SECRET: optionalString,
+    // A second LinkedIn app for Company Pages. LinkedIn only grants the Community
+    // Management API to an app with no other products, so it can't be the one above.
+    LINKEDIN_PAGES_CLIENT_ID: optionalString,
+    LINKEDIN_PAGES_CLIENT_SECRET: optionalString,
     META_APP_ID: optionalString,
     META_APP_SECRET: optionalString,
+    // Instagram Login (no Facebook Page needed). These are the Instagram app id
+    // and secret from the Meta app's "API setup with Instagram login" page, not
+    // META_APP_ID/META_APP_SECRET.
+    INSTAGRAM_APP_ID: optionalString,
+    INSTAGRAM_APP_SECRET: optionalString,
     TIKTOK_CLIENT_KEY: optionalString,
     TIKTOK_CLIENT_SECRET: optionalString,
     GOOGLE_CLIENT_ID: optionalString,
@@ -214,6 +223,13 @@ const envSchema = z
           .filter(Boolean),
       ),
     SOCIAL_OAUTH_STATE_TTL_MINUTES: z.coerce.number().int().min(1).max(60).default(10),
+    /** How often the worker renews tokens that expire unless refreshed (Instagram Login). */
+    SOCIAL_TOKEN_REFRESH_INTERVAL_MS: z.coerce
+      .number()
+      .int()
+      .min(60_000)
+      .max(86_400_000)
+      .default(21_600_000),
 
     // LinkedIn app (products: "Sign In with LinkedIn using OpenID Connect" + "Share on LinkedIn").
     // Must exactly match a redirect URL registered on the app's Auth tab.
@@ -228,6 +244,8 @@ const envSchema = z
     // both platforms, but each has its own callback path, so each redirect URI is
     // registered and configured separately.
     META_FACEBOOK_REDIRECT_URI: optionalString,
+    // Instagram's callback serves both Instagram Login and Facebook Login, so
+    // register it on both the Facebook Login and the Instagram login settings.
     META_INSTAGRAM_REDIRECT_URI: optionalString,
     META_GRAPH_VERSION: z
       .string()
@@ -387,22 +405,46 @@ const envSchema = z
       }
     }
 
-    requireCredentialGroup(
-      "LinkedIn",
-      ["LINKEDIN_CLIENT_ID", "LINKEDIN_CLIENT_SECRET", "LINKEDIN_REDIRECT_URI"],
-      "LINKEDIN_REDIRECT_URI",
-    );
+    // LinkedIn works with the profile app, the Pages app, or both; they share the callback.
+    if (value.LINKEDIN_PAGES_CLIENT_ID || value.LINKEDIN_PAGES_CLIENT_SECRET) {
+      requireCredentialGroup(
+        "LinkedIn Company Pages",
+        ["LINKEDIN_PAGES_CLIENT_ID", "LINKEDIN_PAGES_CLIENT_SECRET", "LINKEDIN_REDIRECT_URI"],
+        "LINKEDIN_REDIRECT_URI",
+      );
+    }
+    if (
+      value.LINKEDIN_CLIENT_ID ||
+      value.LINKEDIN_CLIENT_SECRET ||
+      (value.LINKEDIN_REDIRECT_URI && !value.LINKEDIN_PAGES_CLIENT_ID)
+    ) {
+      requireCredentialGroup(
+        "LinkedIn",
+        ["LINKEDIN_CLIENT_ID", "LINKEDIN_CLIENT_SECRET", "LINKEDIN_REDIRECT_URI"],
+        "LINKEDIN_REDIRECT_URI",
+      );
+    }
     // One Meta app serves both, but each platform needs its own callback URL.
     requireCredentialGroup(
       "Facebook",
       ["META_APP_ID", "META_APP_SECRET", "META_FACEBOOK_REDIRECT_URI"],
       "META_FACEBOOK_REDIRECT_URI",
     );
-    requireCredentialGroup(
-      "Instagram",
-      ["META_APP_ID", "META_APP_SECRET", "META_INSTAGRAM_REDIRECT_URI"],
-      "META_INSTAGRAM_REDIRECT_URI",
-    );
+    // Instagram works with either login, or both: Instagram Login needs the
+    // Instagram app pair, Facebook Login the Meta app pair.
+    if (value.INSTAGRAM_APP_ID || value.INSTAGRAM_APP_SECRET) {
+      requireCredentialGroup(
+        "Instagram login",
+        ["INSTAGRAM_APP_ID", "INSTAGRAM_APP_SECRET", "META_INSTAGRAM_REDIRECT_URI"],
+        "META_INSTAGRAM_REDIRECT_URI",
+      );
+    } else {
+      requireCredentialGroup(
+        "Instagram",
+        ["META_APP_ID", "META_APP_SECRET", "META_INSTAGRAM_REDIRECT_URI"],
+        "META_INSTAGRAM_REDIRECT_URI",
+      );
+    }
     requireCredentialGroup(
       "TikTok",
       ["TIKTOK_CLIENT_KEY", "TIKTOK_CLIENT_SECRET", "TIKTOK_REDIRECT_URI"],

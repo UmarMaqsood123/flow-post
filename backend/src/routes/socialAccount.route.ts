@@ -14,6 +14,7 @@ import {
   publishSocialPostSchema,
   socialAccountIdParamsSchema,
   socialPlatformParamsSchema,
+  startConnectionQuerySchema,
 } from "../validators/socialAccount.validator";
 
 /**
@@ -48,7 +49,7 @@ const requireAccountWorkspace = requireWorkspace({
 
 SocialAccountRouter.get(
   "/:platform/connect",
-  validate({ params: socialPlatformParamsSchema, query: connectSocialAccountQuerySchema }),
+  validate({ params: socialPlatformParamsSchema, query: startConnectionQuerySchema }),
   requireQueryWorkspace,
   requireWorkspaceRole(WorkspaceRole.ADMIN),
   limit.connect,

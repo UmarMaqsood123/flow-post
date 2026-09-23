@@ -22,6 +22,7 @@ import type {
   PublishSocialPostInput,
   SocialAccountIdParams,
   SocialPlatformParams,
+  StartConnectionQuery,
 } from "../validators/socialAccount.validator";
 
 export const ListSocialPlatforms = (_req: Request, res: Response) => {
@@ -39,8 +40,9 @@ export const ListSocialAccounts = async (req: Request, res: Response) => {
 /** Returns the consent URL (the SPA navigates to it) and binds the attempt to this browser. */
 export const StartSocialConnection = async (req: Request, res: Response) => {
   const { platform } = req.params as unknown as SocialPlatformParams;
+  const { method } = req.query as unknown as StartConnectionQuery;
   const { authorizationUrl, expiresAt, browserBinding } =
-    await SocialAccountService.startConnection(getWorkspaceContext(req), platform);
+    await SocialAccountService.startConnection(getWorkspaceContext(req), platform, method);
   setSocialOAuthCookie(res, platform, browserBinding, expiresAt);
   sendSuccess(res, {
     message: "Continue on the platform to connect your account",
@@ -67,7 +69,7 @@ const socialAccountsPageUrl = (platform: SocialPlatformValue, params: Record<str
 /** The platform redirects the browser here; the outcome is shown on the Social Accounts page. */
 export const HandleOAuthCallback = async (req: Request, res: Response) => {
   const { platform } = req.params as unknown as SocialPlatformParams;
-  const { code, state, error } = req.query as OAuthCallbackQuery;
+  const { code, state, error, error_reason: errorReason } = req.query as OAuthCallbackQuery;
   const browserBinding = getSocialOAuthCookie(req, platform);
   clearSocialOAuthCookie(res, platform);
   const finish = (params: Record<string, string>) =>
@@ -75,7 +77,8 @@ export const HandleOAuthCallback = async (req: Request, res: Response) => {
 
   if (error || !code || !state) {
     if (state) await SocialAccountService.abandonConnection(platform, state);
-    finish({ error: error?.startsWith("user_cancelled") ? "cancelled" : "failed" });
+    const cancelled = error?.startsWith("user_cancelled") || errorReason === "user_denied";
+    finish({ error: cancelled ? "cancelled" : "failed" });
     return;
   }
 

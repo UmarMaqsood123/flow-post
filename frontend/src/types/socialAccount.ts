@@ -16,12 +16,22 @@ export type SocialCapability =
   | "DELETE_POST"
   | "TOKEN_REFRESH";
 
+/** One way of signing in, for platforms that offer a choice (Instagram). */
+export interface LoginMethod {
+  id: string;
+  label: string;
+  /** Configured on the server. */
+  available: boolean;
+}
+
 export interface SocialPlatformInfo {
   platform: ConnectablePlatform;
   displayName: string;
   /** Implemented and configured on the server. */
   available: boolean;
   capabilities: SocialCapability[];
+  /** Empty when the platform has only one way to sign in. */
+  loginMethods: LoginMethod[];
 }
 
 /**
@@ -54,6 +64,8 @@ export interface SocialAccount {
   status: SocialAccountStatus;
   scopes: string[];
   capabilities: SocialCapability[];
+  /** How it was signed in, for platforms with a choice. Reconnecting uses the same one. */
+  loginMethod: string | null;
   tokenExpiresAt: string | null;
   lastConnectedAt: string;
   lastRefreshedAt: string | null;

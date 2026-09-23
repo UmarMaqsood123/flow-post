@@ -6,6 +6,8 @@ import { BaseSocialProvider } from "../provider";
 import type {
   AuthorizationRequest,
   AuthorizationRequestInput,
+  ConnectionTarget,
+  LoginMethod,
   OAuthCallbackInput,
   OAuthConnection,
   OAuthTokenSet,
@@ -14,23 +16,36 @@ import type {
   PublishImageInput,
   PublishResult,
   PublishTextInput,
+  RefreshContext,
   SocialProfile,
 } from "../types";
 import { asBody } from "../http";
 
 /**
- * LinkedIn member profiles, using only self-serve products:
- * - "Sign In with LinkedIn using OpenID Connect" (`openid`, `profile`) for the connected profile.
- * - "Share on LinkedIn" (`w_member_social`) for text posts (Posts API) and single-image
- *   posts. Images use the unversioned v2 Assets and UGC Posts APIs: the versioned
- *   `/rest/assets` upload is partner-only and answers 403 for self-serve apps.
+ * LinkedIn personal profiles and Company Pages. Each needs its own LinkedIn app,
+ * because LinkedIn only grants the Community Management API to an app that has
+ * no other products:
  *
- * Not supported, because they need LinkedIn approval or other products:
- * - Company pages (Community Management API: `w_organization_social`).
- * - Reading posts (`r_member_social`) and post analytics.
- * - Programmatic refresh tokens, which only approved partners receive.
+ * - **Profiles** ("profile"), self-serve products on the main app:
+ *   "Sign In with LinkedIn using OpenID Connect" (`openid`, `profile`) for the
+ *   member, and "Share on LinkedIn" (`w_member_social`) to post.
+ * - **Company Pages** ("pages"), the Community Management API on a second app:
+ *   `rw_organization_admin` to find the Pages the member administers and
+ *   `w_organization_social` to post as them. One login can cover several Pages,
+ *   so the user picks one, as with Facebook Pages.
  *
- * Without a refresh token, access tokens last 60 days and the member reconnects.
+ * Both post the same way, differing only in the author URN (person or
+ * organization). Text goes through the Posts API; single images through the
+ * unversioned v2 Assets and UGC Posts APIs, because the versioned `/rest/assets`
+ * upload answers 403 for self-serve apps.
+ *
+ * Which app an account came from is kept in its metadata (`loginMethod`), so a
+ * token is refreshed with the app that issued it. Accounts from before Pages
+ * existed have none and are profiles.
+ *
+ * Not supported: reading posts (`r_member_social` is closed) and analytics.
+ * Refresh tokens only come to approved partners; without one, the 60-day
+ * access token runs out and the user reconnects.
  * Docs: https://learn.microsoft.com/linkedin/marketing/community-management/shares/posts-api
  */
 
@@ -42,6 +57,31 @@ const V2_API_URL = "https://api.linkedin.com/v2";
 
 export const LINKEDIN_SCOPES = ["openid", "profile", "w_member_social"];
 const POSTING_SCOPE = "w_member_social";
+/** Community Management API: find administered Pages, and post as them. */
+export const LINKEDIN_PAGES_SCOPES = ["rw_organization_admin", "w_organization_social"];
+const PAGE_POSTING_SCOPE = "w_organization_social";
+
+export const LinkedInLoginMethod = {
+  PROFILE: "profile",
+  PAGES: "pages",
+} as const;
+export type LinkedInLoginMethodValue =
+  (typeof LinkedInLoginMethod)[keyof typeof LinkedInLoginMethod];
+
+/** Page roles allowed to publish. Others (analysts, recruiters, ad posters) can't. */
+const PAGE_POSTING_ROLES = new Set(["ADMINISTRATOR", "CONTENT_ADMINISTRATOR"]);
+const ORGANIZATION_URN = /^urn:li:organization:(\d+)$/;
+const AUTHOR_URN = /^urn:li:(?:person:[A-Za-z0-9_-]+|organization:\d+)$/;
+/** Enough for any agency; the finder is paged in these steps. */
+const ACL_PAGE_SIZE = 100;
+const MAX_ACL_PAGES = 10;
+const ORGANIZATION_BATCH_SIZE = 50;
+
+interface LinkedInPage {
+  id: string;
+  name: string;
+  vanityName: string | null;
+}
 export const LINKEDIN_MAX_POST_LENGTH = 3000;
 /** Image formats accepted for feed-share images. */
 export const LINKEDIN_IMAGE_TYPES = ["image/jpeg", "image/png"];
@@ -92,8 +132,13 @@ const describeLinkedInError = (body: unknown): string | null => {
 type RequestContext = "token-exchange" | "token-refresh" | "api";
 
 export interface LinkedInProviderConfig {
+  /** The profile app (OpenID Connect + Share on LinkedIn). */
   clientId?: string;
   clientSecret?: string;
+  /** The Company Pages app (Community Management API). */
+  pagesClientId?: string;
+  pagesClientSecret?: string;
+  /** One callback URL serves both apps; register it on each. */
   redirectUri?: string;
   apiVersion: string;
   fetch?: FetchLike;
@@ -121,8 +166,50 @@ export class LinkedInProvider extends BaseSocialProvider {
     this.oauth = { scopes: [...LINKEDIN_SCOPES], usesPkce: false, redirectUri: config.redirectUri };
   }
 
+  private hasProfileApp(): boolean {
+    return Boolean(this.config.clientId && this.config.clientSecret);
+  }
+
+  private hasPagesApp(): boolean {
+    return Boolean(this.config.pagesClientId && this.config.pagesClientSecret);
+  }
+
   isAvailable(): boolean {
-    return Boolean(this.config.clientId && this.config.clientSecret && this.config.redirectUri);
+    return Boolean(this.config.redirectUri && (this.hasProfileApp() || this.hasPagesApp()));
+  }
+
+  listLoginMethods(): LoginMethod[] {
+    const hasRedirect = Boolean(this.config.redirectUri);
+    return [
+      {
+        id: LinkedInLoginMethod.PROFILE,
+        label: "Personal profile",
+        available: hasRedirect && this.hasProfileApp(),
+      },
+      {
+        id: LinkedInLoginMethod.PAGES,
+        label: "Company Page",
+        available: hasRedirect && this.hasPagesApp(),
+      },
+    ];
+  }
+
+  /** The method a flow uses: the one asked for, or the first configured one. */
+  private loginMethod(requested: string | undefined): LinkedInLoginMethodValue {
+    if (requested === LinkedInLoginMethod.PROFILE || requested === LinkedInLoginMethod.PAGES) {
+      return requested;
+    }
+    if (requested !== undefined) {
+      throw this.error("INVALID_REQUEST", "That isn't a way to connect LinkedIn.");
+    }
+    return this.hasProfileApp() ? LinkedInLoginMethod.PROFILE : LinkedInLoginMethod.PAGES;
+  }
+
+  /** Accounts store how they were connected; older ones are profiles. */
+  private methodOf(metadata: Record<string, unknown> | undefined): LinkedInLoginMethodValue {
+    return metadata?.loginMethod === LinkedInLoginMethod.PAGES
+      ? LinkedInLoginMethod.PAGES
+      : LinkedInLoginMethod.PROFILE;
   }
 
   private now() {
@@ -133,10 +220,18 @@ export class LinkedInProvider extends BaseSocialProvider {
     return new SocialProviderError(kind, message, { platform: this.platform, retryable });
   }
 
-  private clientCredentials() {
-    const { clientId, clientSecret } = this.config;
+  private clientCredentials(method: LinkedInLoginMethodValue) {
+    const { clientId, clientSecret } =
+      method === LinkedInLoginMethod.PAGES
+        ? { clientId: this.config.pagesClientId, clientSecret: this.config.pagesClientSecret }
+        : this.config;
     if (!clientId || !clientSecret) {
-      throw this.error("NOT_CONFIGURED", "LinkedIn isn't configured on this server");
+      throw this.error(
+        "NOT_CONFIGURED",
+        method === LinkedInLoginMethod.PAGES
+          ? "LinkedIn Company Pages aren't configured on this server"
+          : "LinkedIn isn't configured on this server",
+      );
     }
     return { clientId, clientSecret };
   }
@@ -233,14 +328,17 @@ export class LinkedInProvider extends BaseSocialProvider {
   async getAuthorizationUrl({
     state,
     redirectUri,
+    loginMethod,
   }: AuthorizationRequestInput): Promise<AuthorizationRequest> {
-    const { clientId } = this.clientCredentials();
+    const method = this.loginMethod(loginMethod);
+    const { clientId } = this.clientCredentials(method);
+    const scopes = method === LinkedInLoginMethod.PAGES ? LINKEDIN_PAGES_SCOPES : this.oauth.scopes;
     const params: Record<string, string> = {
       response_type: "code",
       client_id: clientId,
       redirect_uri: redirectUri,
       state,
-      scope: this.oauth.scopes.join(" "),
+      scope: scopes.join(" "),
     };
     // encodeURIComponent keeps spaces as %20, as LinkedIn documents for `scope`.
     const query = Object.entries(params)
@@ -249,11 +347,36 @@ export class LinkedInProvider extends BaseSocialProvider {
     return { url: `${AUTHORIZATION_URL}?${query}` };
   }
 
-  async handleOAuthCallback({ code, redirectUri }: OAuthCallbackInput): Promise<OAuthConnection> {
+  async handleOAuthCallback({
+    code,
+    redirectUri,
+    loginMethod,
+  }: OAuthCallbackInput): Promise<OAuthConnection> {
+    const method = this.loginMethod(loginMethod);
     const tokens = await this.requestTokens(
       { grant_type: "authorization_code", code, redirect_uri: redirectUri },
       "token-exchange",
+      method,
     );
+
+    if (method === LinkedInLoginMethod.PAGES) {
+      if (tokens.scopes.length > 0 && !tokens.scopes.includes(PAGE_POSTING_SCOPE)) {
+        throw this.error(
+          "PERMISSION_DENIED",
+          "LinkedIn didn't grant permission to post as your Pages. Check that the Pages app has the Community Management API, then connect again.",
+        );
+      }
+      const [first] = await this.listPages(tokens.accessToken);
+      if (!first) {
+        throw this.error(
+          "PERMISSION_DENIED",
+          "You aren't an admin or content admin of any LinkedIn Page. Ask a Page admin to give you one of those roles, then connect again.",
+        );
+      }
+      // The service asks the user to choose when there's more than one.
+      return { tokens, profile: this.pageProfile(first) };
+    }
+
     if (tokens.scopes.length > 0 && !tokens.scopes.includes(POSTING_SCOPE)) {
       throw this.error(
         "PERMISSION_DENIED",
@@ -261,21 +384,133 @@ export class LinkedInProvider extends BaseSocialProvider {
       );
     }
     const profile = await this.fetchProfile(tokens.accessToken);
-    return { tokens, profile };
+    // A profile login is always that one member, even though Pages logins offer a choice.
+    return { tokens, profile, singleAccount: true };
   }
 
-  override async refreshAccessToken(refreshToken: string): Promise<OAuthTokenSet> {
+  /** Refreshed with the app that issued the token. */
+  override async refreshAccessToken(
+    refreshToken: string,
+    account?: RefreshContext,
+  ): Promise<OAuthTokenSet> {
     return this.requestTokens(
       { grant_type: "refresh_token", refresh_token: refreshToken },
       "token-refresh",
+      this.methodOf(account?.metadata),
     );
+  }
+
+  // ── Company Pages ────────────────────────────────────────
+
+  /** Each Page the member can post to is one candidate. */
+  async listConnectionTargets(tokens: OAuthTokenSet): Promise<ConnectionTarget[]> {
+    const pages = await this.listPages(tokens.accessToken);
+    return pages.map((page) => ({
+      id: page.id,
+      name: page.name,
+      username: page.vanityName,
+      image: null,
+      description: "LinkedIn Page",
+    }));
+  }
+
+  /** Posting as a Page uses the member's own token; LinkedIn has no per-Page token. */
+  async connectTarget(tokens: OAuthTokenSet, targetId: string): Promise<OAuthConnection> {
+    const pages = await this.listPages(tokens.accessToken);
+    const page = pages.find((candidate) => candidate.id === targetId);
+    if (!page) {
+      throw this.error("INVALID_REQUEST", "That LinkedIn Page is no longer available to connect.");
+    }
+    return { tokens, profile: this.pageProfile(page) };
+  }
+
+  private pageProfile(page: LinkedInPage): SocialProfile {
+    return {
+      providerAccountId: page.id,
+      accountName: page.name,
+      username: page.vanityName,
+      // logoV2 is a media asset URN, not a link; resolving it costs another call per Page.
+      profileImage: null,
+      metadata: {
+        accountType: "organization",
+        loginMethod: LinkedInLoginMethod.PAGES,
+        authorUrn: `urn:li:organization:${page.id}`,
+      },
+    };
+  }
+
+  /**
+   * The Pages the member may publish to: an approved admin or content admin
+   * role, looked up in pages of the access-control finder, then named in batches.
+   * https://learn.microsoft.com/linkedin/marketing/community-management/organizations/organization-access-control-by-role
+   */
+  private async listPages(accessToken: string): Promise<LinkedInPage[]> {
+    const ids: string[] = [];
+    for (let page = 0; page < MAX_ACL_PAGES; page += 1) {
+      const response = await this.send(
+        `${REST_API_URL}/organizationAcls?q=roleAssignee&state=APPROVED&start=${page * ACL_PAGE_SIZE}&count=${ACL_PAGE_SIZE}`,
+        { headers: this.restHeaders(accessToken) },
+        "api",
+      );
+      const data = await readJson(response);
+      const elements = isRecord(data) && Array.isArray(data.elements) ? data.elements : [];
+      for (const element of elements) {
+        if (!isRecord(element) || !PAGE_POSTING_ROLES.has(String(element.role))) continue;
+        if (element.state !== undefined && element.state !== "APPROVED") continue;
+        // Documented as both `organization` and `organizationTarget`.
+        const urn = element.organization ?? element.organizationTarget;
+        const id = typeof urn === "string" ? ORGANIZATION_URN.exec(urn)?.[1] : undefined;
+        if (id && !ids.includes(id)) ids.push(id);
+      }
+      if (elements.length < ACL_PAGE_SIZE) break;
+    }
+
+    const pages: LinkedInPage[] = [];
+    for (let start = 0; start < ids.length; start += ORGANIZATION_BATCH_SIZE) {
+      const batch = ids.slice(start, start + ORGANIZATION_BATCH_SIZE);
+      // Rest.li list syntax: the parentheses and commas stay literal.
+      const response = await this.send(
+        `${REST_API_URL}/organizations?ids=List(${batch.join(",")})`,
+        { headers: this.restHeaders(accessToken) },
+        "api",
+      );
+      const data = await readJson(response);
+      const results = isRecord(data) && isRecord(data.results) ? data.results : {};
+      for (const id of batch) {
+        pages.push(this.readPage(id, results[id]));
+      }
+    }
+    return pages;
+  }
+
+  private readPage(id: string, organization: unknown): LinkedInPage {
+    const record = isRecord(organization) ? organization : {};
+    const name =
+      typeof record.localizedName === "string" && record.localizedName.trim()
+        ? record.localizedName.trim()
+        : `LinkedIn Page ${id}`;
+    return {
+      id,
+      name,
+      vanityName: typeof record.vanityName === "string" ? record.vanityName : null,
+    };
+  }
+
+  private async fetchPage(accessToken: string, id: string): Promise<SocialProfile> {
+    const response = await this.send(
+      `${REST_API_URL}/organizations/${encodeURIComponent(id)}`,
+      { headers: this.restHeaders(accessToken) },
+      "api",
+    );
+    return this.pageProfile(this.readPage(id, await readJson(response)));
   }
 
   private async requestTokens(
     params: Record<string, string>,
     context: "token-exchange" | "token-refresh",
+    method: LinkedInLoginMethodValue,
   ): Promise<OAuthTokenSet> {
-    const { clientId, clientSecret } = this.clientCredentials();
+    const { clientId, clientSecret } = this.clientCredentials(method);
     const response = await this.send(
       TOKEN_URL,
       {
@@ -316,6 +551,10 @@ export class LinkedInProvider extends BaseSocialProvider {
   // ── Profile ──────────────────────────────────────────────
 
   async getProfile(credentials: ProviderCredentials): Promise<SocialProfile> {
+    if (this.methodOf(credentials.metadata) === LinkedInLoginMethod.PAGES) {
+      // Answers 403 once the member loses their admin role on the Page.
+      return this.fetchPage(credentials.accessToken, credentials.providerAccountId);
+    }
     return this.fetchProfile(credentials.accessToken);
   }
 
@@ -355,6 +594,7 @@ export class LinkedInProvider extends BaseSocialProvider {
       profileImage: typeof body.picture === "string" ? body.picture : null,
       metadata: {
         accountType: "member",
+        loginMethod: LinkedInLoginMethod.PROFILE,
         authorUrn: `urn:li:person:${memberId}`,
         ...(locale ? { locale } : {}),
       },
@@ -375,6 +615,15 @@ export class LinkedInProvider extends BaseSocialProvider {
     }
   }
 
+  /** Who a post is published as: the member, or the Page. */
+  private author(credentials: ProviderCredentials): string {
+    const stored = credentials.metadata.authorUrn;
+    if (typeof stored === "string" && AUTHOR_URN.test(stored)) return stored;
+    return this.methodOf(credentials.metadata) === LinkedInLoginMethod.PAGES
+      ? `urn:li:organization:${credentials.providerAccountId}`
+      : `urn:li:person:${credentials.providerAccountId}`;
+  }
+
   private published(postUrn: string): PublishResult {
     if (!POST_URN.test(postUrn)) {
       throw this.error("PROVIDER_ERROR", "LinkedIn didn't return the new post's id.");
@@ -393,7 +642,7 @@ export class LinkedInProvider extends BaseSocialProvider {
         method: "POST",
         headers: this.restHeaders(credentials.accessToken, "application/json"),
         body: JSON.stringify({
-          author: `urn:li:person:${credentials.providerAccountId}`,
+          author: this.author(credentials),
           commentary: escapeLittleText(text),
           visibility: "PUBLIC",
           distribution: {
@@ -446,7 +695,7 @@ export class LinkedInProvider extends BaseSocialProvider {
         headers: this.v2Headers(credentials.accessToken),
         body: JSON.stringify({
           registerUploadRequest: {
-            owner: `urn:li:person:${credentials.providerAccountId}`,
+            owner: this.author(credentials),
             recipes: [IMAGE_RECIPE],
             serviceRelationships: [
               { identifier: "urn:li:userGeneratedContent", relationshipType: "OWNER" },
@@ -483,7 +732,7 @@ export class LinkedInProvider extends BaseSocialProvider {
         method: "POST",
         headers: this.v2Headers(credentials.accessToken),
         body: JSON.stringify({
-          author: `urn:li:person:${credentials.providerAccountId}`,
+          author: this.author(credentials),
           lifecycleState: "PUBLISHED",
           specificContent: {
             "com.linkedin.ugc.ShareContent": {
@@ -545,6 +794,8 @@ export const createLinkedInProvider = () =>
   new LinkedInProvider({
     clientId: env.LINKEDIN_CLIENT_ID,
     clientSecret: env.LINKEDIN_CLIENT_SECRET,
+    pagesClientId: env.LINKEDIN_PAGES_CLIENT_ID,
+    pagesClientSecret: env.LINKEDIN_PAGES_CLIENT_SECRET,
     redirectUri: env.LINKEDIN_REDIRECT_URI,
     apiVersion: env.LINKEDIN_API_VERSION,
   });

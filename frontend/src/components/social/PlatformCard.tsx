@@ -9,20 +9,26 @@ interface PlatformCardProps {
   platform: SocialPlatformInfo;
   connectedCount: number;
   canManage: boolean;
-  isConnecting: boolean;
+  /** Whether a connection is starting, and with which login method (undefined for the default). */
+  connecting: { method: string | undefined } | null;
   disabled: boolean;
-  onConnect: () => void;
+  onConnect: (method?: string) => void;
 }
 
 function PlatformCard({
   platform,
   connectedCount,
   canManage,
-  isConnecting,
+  connecting,
   disabled,
   onConnect,
 }: PlatformCardProps) {
   const details = PLATFORM_DETAILS[platform.platform];
+  // Platforms with a choice of sign-in (Instagram) get a button per configured method.
+  const methods = platform.loginMethods
+    .filter((method) => method.available)
+    .map((method) => ({ ...method, details: details.loginMethods?.[method.id] }));
+  const showMethods = methods.length > 1;
 
   const status = !details.implemented ? (
     <Badge>Coming soon</Badge>
@@ -83,12 +89,55 @@ function PlatformCard({
         <p className="mt-4 text-xs text-muted">{details.setupHint}</p>
       )}
 
-      {details.implemented && platform.available && (
+      {details.implemented && platform.available && showMethods && (
+        <div className="mt-5 flex flex-col gap-3">
+          <div className="flex flex-wrap items-center gap-3">
+            {methods.map((method, index) => {
+              const isConnecting = connecting?.method === method.id;
+              return (
+                <Button
+                  key={method.id}
+                  variant={index === 0 ? "primary" : "secondary"}
+                  onClick={() => onConnect(method.id)}
+                  isLoading={isConnecting}
+                  disabled={disabled || !canManage}
+                >
+                  {!isConnecting && index === 0 && <Plus className="size-4" aria-hidden="true" />}
+                  {method.details?.buttonLabel ?? `Connect with ${method.label}`}
+                </Button>
+              );
+            })}
+          </div>
+          <ul className="flex flex-col gap-1 text-xs text-muted">
+            {methods.map(
+              (method) =>
+                method.details && (
+                  <li key={method.id}>
+                    <span className="font-medium text-ink">{method.details.buttonLabel}:</span>{" "}
+                    {method.details.hint}
+                  </li>
+                ),
+            )}
+          </ul>
+          {!canManage && (
+            <span className="text-xs text-muted">Admins and owners can connect accounts.</span>
+          )}
+        </div>
+      )}
+
+      {details.implemented && platform.available && !showMethods && (
         <div className="mt-5 flex flex-wrap items-center gap-3">
-          <Button onClick={onConnect} isLoading={isConnecting} disabled={disabled || !canManage}>
-            {!isConnecting && <Plus className="size-4" aria-hidden="true" />}
+          <Button
+            onClick={() => onConnect(methods[0]?.id)}
+            isLoading={connecting !== null}
+            disabled={disabled || !canManage}
+          >
+            {connecting === null && <Plus className="size-4" aria-hidden="true" />}
             {connectedCount > 0 ? "Connect another" : `Connect ${platform.displayName}`}
           </Button>
+          {methods[0]?.details && (
+            <span className="text-xs text-muted">{methods[0].details.hint}</span>
+          )}
           {!canManage && (
             <span className="text-xs text-muted">Admins and owners can connect accounts.</span>
           )}
